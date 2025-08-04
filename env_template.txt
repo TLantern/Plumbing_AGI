@@ -1,0 +1,45 @@
+# Plumbing AGI Environment Configuration Template
+# Copy this to .env and fill in your actual values
+
+# Google Calendar Configuration
+GOOGLE_CALENDAR_ID=primary
+GOOGLE_CREDENTIALS_PATH=credentials.json
+GOOGLE_TOKEN_PATH=token.json
+
+# Akaunting Accounting Configuration
+# For local development:
+AKAUNTING_BASE_URL=http://localhost:8000
+AKAUNTING_API_TOKEN=f00ce44c-ab7d-4170-bd99-1840f342a9d6
+AKAUNTING_COMPANY_ID=safeharbour
+
+# For production/cloud:
+# AKAUNTING_BASE_URL=https://your-akaunting-instance.com
+# AKAUNTING_API_TOKEN=your_akaunting_api_token_here
+# AKAUNTING_COMPANY_ID=your_company_id_here
+
+# Baserow CRM Configuration
+# Get these from your Baserow workspace settings and table URLs
+BASEROW_API_URL=https://api.baserow.io
+BASEROW_API_TOKEN=your_baserow_api_token_here
+BASEROW_DATABASE_ID=your_baserow_database_id_here
+BASEROW_CUSTOMERS_TABLE_ID=your_customers_table_id_here
+BASEROW_INQUIRIES_TABLE_ID=your_inquiries_table_id_here
+
+# Legacy CRM Configuration (if not using Baserow)
+# CRM_API_URL=https://api.crm.com/v1
+# CRM_API_KEY=your_crm_api_key_here
+
+# Inventory/Supplier Configuration
+SUPPLIER_API_URL=https://api.supplier.com/v1
+SUPPLIER_API_KEY=your_supplier_api_key_here
+
+# Database Configuration
+DATABASE_URL=postgresql://username:password@localhost:5432/plumbing_AGI
+
+# Logging Configuration
+LOG_LEVEL=INFO
+
+# QuickBooks Configuration (Legacy - replaced by Akaunting)
+# Remove these if you're using Akaunting:
+# QB_COMPANY_ID=your_quickbooks_company_id
+# QB_ACCESS_TOKEN=your_quickbooks_access_token 

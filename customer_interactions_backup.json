@@ -1,0 +1,4 @@
+{"timestamp": "2025-08-03T14:02:42.375680", "phone": "555-TEST-123", "email": null, "name": "Test Customer", "type": "Phone (Inbound)", "content": "Customer called from 555-TEST-123. Testing fallback", "saved_locally": true}
+{"timestamp": "2025-08-03T14:06:02.448259", "phone": "555-TEST-001", "email": null, "name": "Test Customer Alpha", "type": "Phone (Inbound)", "content": "Called about kitchen sink repair", "saved_locally": true}
+{"timestamp": "2025-08-03T14:06:03.608033", "phone": "555-TEST-002", "email": null, "name": "Test Customer Beta", "type": "SMS (Inbound)", "content": "Need quote for bathroom renovation", "saved_locally": true}
+{"timestamp": "2025-08-03T14:06:04.756237", "phone": null, "email": "test@customer.com", "name": "Test Customer Gamma", "type": "Email (Inbound)", "content": "Interested in scheduling maintenance service", "saved_locally": true}

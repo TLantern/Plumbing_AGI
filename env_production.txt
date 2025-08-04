@@ -1,0 +1,26 @@
+# Production Environment
+# Copy this to .env for production deployment
+
+# Google Calendar Configuration
+GOOGLE_CALENDAR_ID=primary
+GOOGLE_CREDENTIALS_PATH=credentials.json
+GOOGLE_TOKEN_PATH=token.json
+
+# Akaunting Accounting Configuration (Production)
+AKAUNTING_BASE_URL=https://your-akaunting-instance.com
+AKAUNTING_API_TOKEN=your_production_api_token
+AKAUNTING_COMPANY_ID=1
+
+# CRM Configuration (Production)
+CRM_API_URL=https://your-crm-api.com
+CRM_API_KEY=your_production_crm_key
+
+# Inventory/Supplier Configuration (Production)
+SUPPLIER_API_URL=https://your-supplier-api.com
+SUPPLIER_API_KEY=your_production_supplier_key
+
+# Database Configuration (Production)
+DATABASE_URL=postgresql://username:password@production-db:5432/plumbing_AGI
+
+# Logging Configuration
+LOG_LEVEL=INFO 
