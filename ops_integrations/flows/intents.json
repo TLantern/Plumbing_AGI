@@ -1,0 +1,114 @@
+{
+    "intents": [
+    {
+    "tag": "EMERGENCY_FIX",
+    "patterns": [
+    "my pipe just burst",
+    "water everywhere",
+    "flooding in my house",
+    "leak is flooding",
+    "urgent leak"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "CLOG_BLOCKAGE",
+    "patterns": [
+    "toilet won't flush",
+    "sink won't drain",
+    "backed up",
+    "drain is clogged",
+    "water won't go down"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "LEAKING_FIXTURE",
+    "patterns": [
+    "leak under sink",
+    "faucet dripping",
+    "tub is leaking",
+    "water dripping",
+    "spray when I turn on tap"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "INSTALL_REQUEST",
+    "patterns": [
+    "install new faucet",
+    "replace my toilet",
+    "need a new water heater",
+    "install pipe",
+    "fixture installation"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "WATER_HEATER_ISSUE",
+    "patterns": [
+    "no hot water",
+    "water heater making noise",
+    "tank not heating",
+    "heater leaking",
+    "cold showers"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "QUOTE_REQUEST",
+    "patterns": [
+    "how much to replace",
+    "quote for plumbing",
+    "estimate cost",
+    "price for",
+    "service rate"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "REMODEL_INQUIRY",
+    "patterns": [
+    "bathroom reno",
+    "remodel my kitchen",
+    "remodeling project",
+    "new bathroom design",
+    "kitchen upgrade"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "RECURRING_PROBLEM",
+    "patterns": [
+    "you fixed this before",
+    "same issue again",
+    "back again",
+    "return service",
+    "follow-up on previous job"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "DRAIN_MAINTENANCE",
+    "patterns": [
+    "drain cleaning",
+    "maintenance",
+    "clean out grease trap",
+    "preventive service",
+    "annual maintenance"
+    ],
+    "responses": []
+    },
+    {
+    "tag": "GENERAL_INQUIRY",
+    "patterns": [
+    "do you guys open",
+    "need a plumber",
+    "what services",
+    "how do I book",
+    "hey there"
+    ],
+    "responses": []
+    }
+    ]
+    }

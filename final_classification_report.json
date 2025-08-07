@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "name": "Call Center Transcript HVAC Classification",
+    "dataset": "Kaggle Call Center Transcripts",
+    "total_transcripts": 20,
+    "classification_task": "HVAC-related vs Non-HVAC calls"
+  },
+  "original_algorithm": {
+    "hvac_calls": 11,
+    "non_hvac_calls": 9,
+    "hvac_percentage": 55.00000000000001
+  },
+  "improved_algorithm": {
+    "hvac_calls": 3,
+    "non_hvac_calls": 17,
+    "hvac_percentage": 15.0,
+    "average_confidence": 0.15650000000000003
+  },
+  "improvement": {
+    "hvac_difference": -8,
+    "false_positives_reduced": 8,
+    "accuracy_improvement": "Significant reduction in false positives"
+  },
+  "correctly_classified_hvac": [
+    {
+      "id": "call_recording_01",
+      "product_number": "AC-7892",
+      "confidence_score": 1.0,
+      "matched_keywords": "HVAC product: AC-7892; air conditioner; ac (strong HVAC context)",
+      "transcript_preview": "Hello, I'm Sarah Miller. I'm calling to inquire about the AC-7892 air conditioner unit. I saw it on ..."
+    },
+    {
+      "id": "call_recording_02",
+      "product_number": "FR-4401",
+      "confidence_score": 1.0,
+      "matched_keywords": "HVAC product: FR-4401; refrigerator; cooling (with HVAC context); ac (strong HVAC context)",
+      "transcript_preview": "I am extremely dissatisfied with my recent order! I am John Davis, and I'm calling about order numbe..."
+    },
+    {
+      "id": "call_recording_05",
+      "product_number": "OV-1357 & MW-8642",
+      "confidence_score": 0.8,
+      "matched_keywords": "HVAC product: OV-1357 & MW-8642",
+      "transcript_preview": "Hello, my name is Jessica Brown. I'd like to place an order. I want to order one OV-1357 oven and on..."
+    }
+  ]
+}

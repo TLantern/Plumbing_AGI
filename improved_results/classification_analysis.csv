@@ -1,0 +1,21 @@
+id,Product Number,is_hvac_improved,confidence_score,matched_keywords,product_number_analysis
+call_recording_01,AC-7892,True,1.0,HVAC product: AC-7892; air conditioner; ac (strong HVAC context),True
+call_recording_02,FR-4401,True,1.0,HVAC product: FR-4401; refrigerator; cooling (with HVAC context); ac (strong HVAC context),True
+call_recording_03,LAP-2110,False,0.0,Non-HVAC context detected (penalty applied),False
+call_recording_04,DW-6543,False,0.0,,False
+call_recording_05,OV-1357 & MW-8642,True,0.8,HVAC product: OV-1357 & MW-8642,True
+call_recording_06,SPK-9988,False,0.0,Non-HVAC context detected (penalty applied),False
+call_recording_07,HD-2771,False,0.0,,False
+call_recording_08,ROUT-5678,False,0.0,,False
+call_recording_09,MON-2345 & KB-1234 & MOUSE-4567,False,0.0,,False
+call_recording_10,PR-9876,False,0.03,ac (weak HVAC context); Non-HVAC context detected (penalty applied),False
+call_recording_11,MED-7654,False,0.0,,False
+call_recording_12,SOFA-123,False,0.0,Non-HVAC context detected (penalty applied),False
+call_recording_13,SERVER-8901,False,0.0,,False
+call_recording_14,GAME-CONSOLE-X & GAME-CONTROLLER-Y,False,0.0,Non-HVAC context detected (penalty applied),False
+call_recording_15,CAMERA-PRO-1,False,0.0,Non-HVAC context detected (penalty applied),False
+call_recording_16,TABLET-Z,False,0.0,Non-HVAC context detected (penalty applied),False
+call_recording_17,WASHER-DRYER-COMBO,False,0.24,HVAC product: WASHER-DRYER-COMBO; Non-HVAC context detected (penalty applied),True
+call_recording_18,SOFTWARE-SUITE-PRO,False,0.0,Non-HVAC context detected (penalty applied),False
+call_recording_19,OFFICE-CHAIR-X5 & DESK-L-SHAPE-Y7 & FILING-CABINET-Z9,False,0.0,,False
+call_recording_20,TV-ULTRA-4K-85,False,0.06,heater (no HVAC context); Non-HVAC context detected (penalty applied),False
