@@ -12,9 +12,21 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-from ops_integrations.adapters.crm import CRMAdapter, InteractionType
-from ops_integrations.adapters.calendar import CalendarAdapter
-from ops_integrations.adapters.sms import SMSAdapter
+# Prefer package-relative imports; on failure, fall back to script-friendly absolute imports
+try:
+    from .adapters.crm import CRMAdapter, InteractionType
+    from .adapters.google_calendar import CalendarAdapter
+    from .adapters.sms import SMSAdapter
+except Exception:
+    import sys as _sys
+    import os as _os
+    _CURRENT_DIR = _os.path.dirname(__file__)
+    # Ensure ops_integrations (this file's directory) is on sys.path so 'adapters' can be imported as top-level
+    if _CURRENT_DIR not in _sys.path:
+        _sys.path.insert(0, _CURRENT_DIR)
+    from adapters.crm import CRMAdapter, InteractionType
+    from adapters.google_calendar import CalendarAdapter
+    from adapters.sms import SMSAdapter
 
 logging.basicConfig(level=logging.INFO)
 

@@ -44,12 +44,14 @@ call_data = {}
 def webhook():
     """Main webhook endpoint for incoming calls."""
     try:
-        # Get call details from Twilio
-        call_sid = request.form.get('CallSid')
+        # Get call details from Twilio - try both form data and query params
+        call_sid = request.form.get('CallSid') or request.args.get('callSid')
         from_number = request.form.get('From')
         to_number = request.form.get('To')
         
         logger.info(f"New call received - SID: {call_sid}, From: {from_number}, To: {to_number}")
+        logger.info(f"Query params: {dict(request.args)}")
+        logger.info(f"Form data keys: {list(request.form.keys())}")
         
         # Store call data
         call_data[call_sid] = {
@@ -66,7 +68,10 @@ def webhook():
         response = VoiceResponse()
         
         # Greeting message
-        response.say("Hey, how's it going? How can we help you with your plumbing needs today?", voice='alice')
+        response.say("Thank you for calling SafeHarbour Plumbing Services. We're here to help with all your plumbing needs. What can we assist you with today?", voice='alice')
+        
+        # Add callSid to the transcription callback URL
+        transcription_callback_url = f"/transcription-callback?callSid={call_sid}" if call_sid else "/transcription-callback"
         
         # Record the call with transcription
         response.record(
@@ -74,7 +79,7 @@ def webhook():
             method='POST',
             maxLength=60,  # 60 seconds max
             transcribe=True,
-            transcribeCallback='/transcription-callback',
+            transcribeCallback=transcription_callback_url,
             playBeep=True
         )
         
@@ -150,11 +155,14 @@ def handle_transcription():
 def transcription_callback():
     """Handle transcription callback from Twilio."""
     try:
-        call_sid = request.form.get('CallSid')
+        # Get callSid from both form data and query params
+        call_sid = request.form.get('CallSid') or request.args.get('callSid')
         transcription_text = request.form.get('TranscriptionText', '')
         transcription_status = request.form.get('TranscriptionStatus', '')
         
         logger.info(f"Transcription callback for call {call_sid}: {transcription_status}")
+        logger.info(f"Query params: {dict(request.args)}")
+        logger.info(f"Form data keys: {list(request.form.keys())}")
         logger.info(f"Transcription text: {transcription_text}")
         
         if call_sid in call_data:

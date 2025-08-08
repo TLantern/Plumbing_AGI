@@ -20,6 +20,7 @@ try:
     from sentence_transformers import SentenceTransformer
     from sklearn.metrics.pairwise import cosine_similarity
     BERT_AVAILABLE = True
+    print("Using sentence-transformers for BERT functionality")
 except ImportError:
     print("Warning: sentence-transformers not available. Using keyword-based detection only.")
     BERT_AVAILABLE = False

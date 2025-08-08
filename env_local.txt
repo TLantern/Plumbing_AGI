@@ -1,6 +1,16 @@
 # Local Development Environment
 # Copy this to .env for local development
 
+# Twilio Configuration for Phone/Voice Services (Local Development)
+TWILIO_ACCOUNT_SID=your_twilio_account_sid_here
+TWILIO_AUTH_TOKEN=your_twilio_auth_token_here
+TWILIO_FROM_NUMBER=your_twilio_phone_number_here
+# For local development, start ngrok with: ngrok http 5001
+EXTERNAL_WEBHOOK_URL=https://your-ngrok-url.ngrok.io
+
+# OpenAI Configuration (for speech-to-text)
+OPENAI_API_KEY=your_openai_api_key_here
+
 # Google Calendar Configuration
 GOOGLE_CALENDAR_ID=primary
 GOOGLE_CREDENTIALS_PATH=credentials.json

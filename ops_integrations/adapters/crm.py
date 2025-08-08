@@ -5,7 +5,10 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
 from dotenv import load_dotenv
-from ops_integrations.models import Customer
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from models import Customer
 
 # Load environment variables
 load_dotenv()
