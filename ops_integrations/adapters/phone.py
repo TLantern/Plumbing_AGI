@@ -41,7 +41,17 @@ except Exception:
     from job_booking import book_emergency_job, book_scheduled_job
     from google_calendar import CalendarAdapter
 from datetime import datetime, timedelta
-import webrtcvad
+try:
+    import webrtcvad  # type: ignore
+except Exception:
+    class _DummyVAD:
+        def __init__(self, aggressiveness: int):
+            pass
+        def is_speech(self, frame_bytes: bytes, sample_rate: int) -> bool:
+            return False
+    class _webrtcvad_module:  # minimal shim for interface
+        Vad = _DummyVAD
+    webrtcvad = _webrtcvad_module()  # type: ignore
 import struct
 import time
 import httpx
@@ -120,6 +130,18 @@ tts_audio_store: dict[str, bytes] = {}
 # Store last TwiML per call for fallback delivery via URL
 last_twiml_store: dict[str, str] = {}
 
+# Live Ops metrics aggregation and websocket clients
+from collections import deque
+ops_metrics_state = {
+    "total_calls": 0,
+    "answered_calls": 0,
+    "abandoned_calls": 0,
+    "handle_times_sec": [],            # durations of completed calls
+    "answer_times_sec": [],            # time to first media since webhook start
+    "call_history": deque(maxlen=200), # recent completed calls
+}
+ops_ws_clients: set[WebSocket] = set()
+
 from twilio.twiml.voice_response import Gather
 
 #---------------LOGGING SETUP---------------
@@ -144,6 +166,128 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+# New: metrics snapshot computation and broadcast utilities
+
+def _format_duration(seconds: float) -> str:
+    try:
+        seconds = max(0, int(seconds))
+        m, s = divmod(seconds, 60)
+        h, m = divmod(m, 60)
+        if h:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+    except Exception:
+        return "00:00"
+
+
+def _compute_ops_snapshot() -> dict:
+    try:
+        active_calls = len(manager.active_connections) if 'manager' in globals() else 0
+    except Exception:
+        active_calls = 0
+    total = int(ops_metrics_state.get("total_calls", 0))
+    answered = int(ops_metrics_state.get("answered_calls", 0))
+    abandoned = int(ops_metrics_state.get("abandoned_calls", 0))
+    handle_times = list(ops_metrics_state.get("handle_times_sec", []))
+    answer_times = list(ops_metrics_state.get("answer_times_sec", []))
+
+    aht_sec = sum(handle_times) / len(handle_times) if handle_times else 0
+    avg_wait_sec = sum(answer_times) / len(answer_times) if answer_times else 0
+    abandon_rate = (abandoned / total * 100.0) if total else 0.0
+
+    # Construct a lightweight recent-calls table
+    recent = list(ops_metrics_state.get("call_history", []))
+
+    # Build a simple SLA time series (percent answered within 20s per 10-min bucket)
+    try:
+        now_ts = time.time()
+        window_seconds = 60 * 60  # last hour
+        cutoff = now_ts - window_seconds
+        buckets = {}
+        for rec in recent:
+            st = rec.get("start_ts", 0)
+            if st < cutoff:
+                continue
+            bucket_min = int((st // 600) * 600)  # 10-min buckets
+            b = buckets.setdefault(bucket_min, {"answered": 0, "within": 0})
+            if rec.get("answered"):
+                b["answered"] += 1
+                ans = rec.get("answer_time_sec", None)
+                if ans is not None and ans <= 20:
+                    b["within"] += 1
+        series = []
+        for k in sorted(buckets.keys()):
+            pct = 0
+            if buckets[k]["answered"]:
+                pct = int(100 * buckets[k]["within"] / buckets[k]["answered"])
+            series.append({"date": datetime.fromtimestamp(k).strftime("%H:%M"), "value": pct})
+    except Exception:
+        series = []
+
+    snapshot = {
+        "activeCalls": active_calls,
+        "totalCalls": total,
+        "answeredCalls": answered,
+        "abandonedCalls": abandoned,
+        "ahtSec": aht_sec,
+        "avgWaitSec": avg_wait_sec,
+        "abandonRate": abandon_rate,
+        "sla": series,
+        "csat": [],  # Not tracked here
+        "agents": [],  # Not tracked here
+        "recentCalls": recent[-50:],
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "aht": _format_duration(aht_sec),
+        "avgWait": _format_duration(avg_wait_sec),
+    }
+    return snapshot
+
+
+async def _broadcast_ops_metrics():
+    if not ops_ws_clients:
+        return
+    snapshot = _compute_ops_snapshot()
+    disconnected = []
+    for ws in list(ops_ws_clients):
+        try:
+            await ws.send_json({"type": "metrics", "data": snapshot})
+        except WebSocketDisconnect:
+            disconnected.append(ws)
+        except Exception:
+            disconnected.append(ws)
+    for ws in disconnected:
+        try:
+            ops_ws_clients.discard(ws)
+        except Exception:
+            pass
+
+
+@app.get("/metrics")
+async def get_metrics_snapshot():
+    return JSONResponse(content=_compute_ops_snapshot())
+
+
+@app.websocket("/ops")
+async def ops_metrics_ws(ws: WebSocket):
+    await ws.accept()
+    ops_ws_clients.add(ws)
+    try:
+        # Send initial snapshot
+        await ws.send_json({"type": "metrics", "data": _compute_ops_snapshot()})
+        # Keepalive loop; actual updates are pushed from call events
+        while True:
+            try:
+                # Optional: receive ping/keepalive from client
+                await asyncio.sleep(30)
+                try:
+                    await ws.send_json({"type": "keepalive", "ts": datetime.utcnow().isoformat() + "Z"})
+                except Exception:
+                    pass
+            except WebSocketDisconnect:
+                break
+    finally:
+        ops_ws_clients.discard(ws)
 
 # Add endpoint to serve synthesized TTS audio for Twilio <Play>
 @app.get("/tts/{call_sid}.mp3")
@@ -231,7 +375,18 @@ async def voice_webhook(request: Request):
     
     # Store call information for use during the call
     call_info_store[call_sid] = call_info
-    
+
+    # Update ops metrics on call arrival
+    try:
+        ops_metrics_state["total_calls"] = int(ops_metrics_state.get("total_calls", 0)) + 1
+    except Exception:
+        ops_metrics_state["total_calls"] = 1
+    # Broadcast new snapshot (activeCalls will reflect connection once established)
+    try:
+        asyncio.create_task(_broadcast_ops_metrics())
+    except Exception:
+        pass
+
     # Log the call start with key details
     logger.info(f"📞 CALL STARTED - {call_sid}")
     logger.info(f"   📱 From: {call_info['from']} ({call_info['from_city']}, {call_info['from_state']})")
@@ -404,6 +559,12 @@ async def media_stream(ws: WebSocket):
             manager.active_connections[callSid] = ws
             logger.info(f"WebSocket connection established for CallSid={callSid}")
         
+        # Push updated metrics for active call count
+        try:
+            await _broadcast_ops_metrics()
+        except Exception:
+            pass
+        
         # Start receiving messages
         try:
             while True:
@@ -414,6 +575,14 @@ async def media_stream(ws: WebSocket):
         except Exception as e:
             logger.error(f"WebSocket error for CallSid={callSid}: {e}")
         finally:
+            try:
+                _finalize_call_metrics(callSid)
+            except Exception:
+                pass
+            try:
+                await _broadcast_ops_metrics()
+            except Exception:
+                pass
             await manager.disconnect(callSid)
             
     except Exception as e:
@@ -444,6 +613,25 @@ async def handle_media_packet(call_sid: str, msg: str):
             state = vad_states[call_sid]
             if not state.get('has_received_media'):
                 state['has_received_media'] = True
+                # Mark first media for metrics (answer time)
+                info = call_info_store.get(call_sid, {})
+                if not info.get('first_media_ts'):
+                    first_ts = time.time()
+                    info['first_media_ts'] = first_ts
+                    call_info_store[call_sid] = info
+                    try:
+                        ops_metrics_state["answered_calls"] = int(ops_metrics_state.get("answered_calls", 0)) + 1
+                    except Exception:
+                        ops_metrics_state["answered_calls"] = 1
+                    try:
+                        start_ts = float(info.get('start_ts') or first_ts)
+                        ops_metrics_state["answer_times_sec"].append(max(0.0, first_ts - start_ts))
+                    except Exception:
+                        pass
+                    try:
+                        asyncio.create_task(_broadcast_ops_metrics())
+                    except Exception:
+                        pass
                 logger.info(f"🎧 Listening active for {call_sid} (first media frame)")
             if call_sid in call_info_store:
                 call_info_store[call_sid]['last_media_time'] = time.time()
@@ -462,6 +650,12 @@ async def handle_media_packet(call_sid: str, msg: str):
         if vad_state and vad_state['is_speaking'] and len(vad_state['pending_audio']) > 0:
             logger.info(f"🎤 Processing final speech segment for {call_sid} on stream stop")
             await process_speech_segment(call_sid, vad_state['pending_audio'])
+        # Finalize call metrics before cleanup
+        try:
+            _finalize_call_metrics(call_sid)
+            await _broadcast_ops_metrics()
+        except Exception:
+            pass
         await manager.disconnect(call_sid)
     elif event == "connected":
         logger.debug(f"🔌 Media WebSocket connected event for {call_sid}")
@@ -1295,6 +1489,49 @@ async def streaming_watchdog(call_sid: str, delay_seconds: float = 5.0):
             logger.debug(f"Watchdog: media already flowing for {call_sid}; no action needed")
     except Exception as e:
         logger.error(f"Watchdog error for {call_sid}: {e}")
+
+# Finalize metrics aggregation for a call
+
+def _finalize_call_metrics(call_sid: str) -> None:
+    try:
+        info = call_info_store.get(call_sid)
+        if not info:
+            return
+        if info.get('_finalized'):
+            return
+        end_ts = time.time()
+        start_ts = float(info.get('start_ts') or end_ts)
+        duration = max(0.0, end_ts - start_ts)
+        # Abandoned if no media was received
+        answered = bool(info.get('first_media_ts')) or bool(vad_states.get(call_sid, {}).get('has_received_media'))
+        if not answered:
+            try:
+                ops_metrics_state["abandoned_calls"] = int(ops_metrics_state.get("abandoned_calls", 0)) + 1
+            except Exception:
+                ops_metrics_state["abandoned_calls"] = 1
+        try:
+            ops_metrics_state["handle_times_sec"].append(duration)
+        except Exception:
+            pass
+        # Record into recent history
+        try:
+            rec = {
+                "call_sid": call_sid,
+                "from": info.get("from"),
+                "to": info.get("to"),
+                "start_ts": start_ts,
+                "end_ts": end_ts,
+                "duration_sec": duration,
+                "answered": answered,
+                "answer_time_sec": max(0.0, float(info.get('first_media_ts') - start_ts)) if info.get('first_media_ts') else None,
+            }
+            ops_metrics_state["call_history"].append(rec)
+        except Exception:
+            pass
+        info['_finalized'] = True
+        call_info_store[call_sid] = info
+    except Exception as e:
+        logger.debug(f"Finalize metrics failed for {call_sid}: {e}")
 
 #---------------AUDIO PROCESSING---------------
 def pcm_to_wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
