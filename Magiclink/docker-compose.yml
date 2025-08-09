@@ -1,0 +1,20 @@
+version: "3.9"
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+  api:
+    build:
+      context: ..
+      dockerfile: Magiclink/Dockerfile
+    environment:
+      - APP_BASE_URL=http://localhost:8000
+      - FRONTEND_ORIGIN=http://localhost:3000
+      - JWT_SECRET=change-me
+      - JWT_TTL_MINUTES=10
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis 

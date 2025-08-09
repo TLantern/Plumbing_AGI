@@ -1,9 +1,10 @@
 {
-  "dependencies": {
-    "composer": "^4.1.0",
-    "install": "^0.13.0",
-    "requests": "^0.3.0",
-    "twilio": "^5.8.0",
-    "webrtcvad": "^1.0.1"
+  "name": "plumbing-agi-root",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n magic,phone,web -c blue,magenta,green \"uvicorn Magiclink.magic:app --host 0.0.0.0 --port 8000 --reload\" \"uvicorn ops_integrations.adapters.phone:app --host 0.0.0.0 --port 5001 --reload\" \"cd frontend && next dev -p 3000\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
   }
 }

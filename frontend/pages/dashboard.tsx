@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useIsMounted } from '@/hooks/useIsMounted';
 
 const pieColors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#d62728'];
 
@@ -69,6 +70,7 @@ function formatTime(sec: number) {
 }
 
 export default function LiveOpsDashboard() {
+  const mounted = useIsMounted();
   const [metrics, setMetrics] = useState<MetricsSnapshot>(defaultMetrics);
   const [wsProblem, setWsProblem] = useState<string | null>(null);
 
@@ -89,11 +91,12 @@ export default function LiveOpsDashboard() {
         setMetrics((prev) => ({ ...prev, ...msg.data }));
       }
     },
-    enabled: true,
+    enabled: mounted,
   });
 
   // Initial fetch + periodic polling fallback
   useEffect(() => {
+    if (!mounted) return;
     const fetchMetrics = async () => {
       try {
         const res = await fetch('/api/live-metrics');
@@ -108,13 +111,22 @@ export default function LiveOpsDashboard() {
     fetchMetrics();
     const id = setInterval(fetchMetrics, 15000);
     return () => clearInterval(id);
-  }, []);
+  }, [mounted]);
 
   const csat = metrics.csat && metrics.csat.length > 0 ? metrics.csat : [
     { name: 'Satisfied', value: 4 },
     { name: 'Neutral', value: 2 },
     { name: 'Dissatisfied', value: 1 },
   ];
+
+  if (!mounted) {
+    // Render deterministic shell to avoid SSR/CSR mismatch
+    return (
+      <div className="min-h-screen bg-background text-white p-6 space-y-6">
+        <h1 className="text-xl font-semibold">Live Ops Dashboard</h1>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-white p-6 space-y-6">
@@ -202,7 +214,6 @@ export default function LiveOpsDashboard() {
                     ))}
                   </Pie>
                   <Legend />
-                  <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -213,36 +224,31 @@ export default function LiveOpsDashboard() {
       {/* Recent Calls */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Recent Calls</CardTitle>
-            <div className="text-xs text-white/60">Abandon Rate: {formatPercent(metrics.abandonRate)}</div>
-          </div>
+          <CardTitle>Recent Calls</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
             <THead>
               <TR>
-                <TH>Time</TH>
+                <TH>Call SID</TH>
                 <TH>From</TH>
                 <TH>To</TH>
-                <TH>Answered</TH>
-                <TH>Answer Time</TH>
+                <TH>Start</TH>
+                <TH>End</TH>
                 <TH>Duration</TH>
+                <TH>Answered</TH>
               </TR>
             </THead>
             <TBody>
-              {metrics.recentCalls?.slice().reverse().map((c) => (
+              {metrics.recentCalls?.map((c) => (
                 <TR key={c.call_sid}>
-                  <TD>{new Date(c.start_ts * 1000).toLocaleTimeString()}</TD>
+                  <TD>{c.call_sid}</TD>
                   <TD>{c.from || '-'}</TD>
                   <TD>{c.to || '-'}</TD>
-                  <TD>
-                    <Badge className={c.answered ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-300'}>
-                      {c.answered ? 'Yes' : 'No'}
-                    </Badge>
-                  </TD>
-                  <TD>{c.answer_time_sec != null ? formatTime(c.answer_time_sec) : '-'}</TD>
+                  <TD>{new Date(c.start_ts * 1000).toLocaleString()}</TD>
+                  <TD>{new Date(c.end_ts * 1000).toLocaleString()}</TD>
                   <TD>{formatTime(c.duration_sec)}</TD>
+                  <TD>{c.answered ? 'Yes' : 'No'}</TD>
                 </TR>
               ))}
             </TBody>

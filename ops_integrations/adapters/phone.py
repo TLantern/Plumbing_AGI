@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 import json
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from twilio import twiml
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Start
@@ -65,6 +65,8 @@ except Exception:
 
 #---------------CONFIGURATION---------------
 class Settings(BaseSettings):
+    # Read .env by default (repo root). You can also export envs directly.
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
     TWILIO_ACCOUNT_SID: str 
     TWILIO_AUTH_TOKEN: str
     EXTERNAL_WEBHOOK_URL: str  # External URL for WebSocket (e.g., ngrok URL)
@@ -79,6 +81,12 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: Optional[str] = None  # Set a default in env if desired
     ELEVENLABS_MODEL_ID: Optional[str] = None  # e.g. "eleven_multilingual_v2"
     FORCE_SAY_ONLY: bool = True  # Diagnostics: avoid TTS and use <Say>
+    # Magiclink integration
+    MAGICLINK_API_BASE: str = os.getenv("MAGICLINK_API_BASE", "http://localhost:8000")
+    MAGICLINK_APP_URL: str = os.getenv("MAGICLINK_APP_URL", "http://localhost:3000/location")
+    MAGICLINK_ADMIN_API_KEY: Optional[str] = os.getenv("MAGICLINK_ADMIN_API_KEY")
+    # Accept either TWILIO_SMS_FROM or TWILIO_FROM_NUMBER for convenience
+    TWILIO_SMS_FROM: Optional[str] = os.getenv("TWILIO_SMS_FROM") or os.getenv("TWILIO_FROM_NUMBER")
     class Config:
        load_dotenv()
 
@@ -148,12 +156,41 @@ ops_ws_clients: set[WebSocket] = set()
 
 from twilio.twiml.voice_response import Gather
 
+# Magiclink per-call state
+magiclink_state: dict[str, dict] = {}
+
 #---------------LOGGING SETUP---------------
 logging.basicConfig(
     level=settings.LOG_LEVEL,
     format="%(asctime)s %(levelname)s %(name)s %(message)s"  
 )
 logger = logging.getLogger("voice-intent")
+
+# Twilio REST client (safe init)
+try:
+    from twilio.base.exceptions import TwilioException as _TwilioException  # type: ignore
+except Exception:
+    class _TwilioException(Exception):
+        pass
+
+twilio_client: Optional[Client] = None
+try:
+    if settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN:
+        twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    else:
+        logger.warning("Twilio disabled: missing TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN; SMS and TwiML updates will be skipped")
+except Exception as e:
+    logger.error(f"Twilio client init failed: {e}")
+    twilio_client = None
+
+logger.info(
+    "env_loaded",
+    extra={
+        "evt": "env",
+        "twilio_sid": bool(os.getenv("TWILIO_ACCOUNT_SID")),
+        "twilio_from": bool(os.getenv("TWILIO_SMS_FROM") or os.getenv("TWILIO_FROM_NUMBER")),
+    },
+)
 
 #---------------FASTAPI APP---------------
 app = FastAPI(
@@ -171,7 +208,7 @@ app.add_middleware(
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
-# New: metrics snapshot computation and broadcast utilities
+# Metrics snapshot computation and broadcast utilities (restored)
 
 def _format_duration(seconds: float) -> str:
     try:
@@ -293,6 +330,120 @@ async def ops_metrics_ws(ws: WebSocket):
     finally:
         ops_ws_clients.discard(ws)
 
+# Magiclink helper functions
+async def _magiclink_mint_token(call_sid: str) -> dict:
+    url = f"{settings.MAGICLINK_API_BASE}/tokens/location"
+    async with httpx.AsyncClient(timeout=10) as http:
+        r = await http.post(url, params={"sid": call_sid})
+        r.raise_for_status()
+        return r.json()
+
+async def _magiclink_check_status(call_sid: str) -> bool:
+    if not settings.MAGICLINK_ADMIN_API_KEY:
+        return False
+    url = f"{settings.MAGICLINK_API_BASE}/admin/calls/{call_sid}/location/status"
+    async with httpx.AsyncClient(timeout=10) as http:
+        r = await http.get(url, headers={"x-api-key": settings.MAGICLINK_ADMIN_API_KEY})
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        return bool(data.get("present"))
+
+async def _send_magiclink_sms(call_sid: str) -> bool:
+    try:
+        token_resp = await _magiclink_mint_token(call_sid)
+        token = token_resp.get("token")
+        if not token:
+            return False
+        link = f"{settings.MAGICLINK_APP_URL}?token={token}"
+        call_info = call_info_store.get(call_sid, {})
+        to_number = call_info.get("from")
+        from_number = settings.TWILIO_SMS_FROM or call_info.get("to")
+        if not to_number or not from_number:
+            logger.error(f"SMS send failed: missing to/from numbers for CallSid={call_sid}")
+            return False
+        if twilio_client is None:
+            logger.warning("SMS send skipped: Twilio client unavailable")
+            return False
+        twilio_client.messages.create(to=to_number, from_=from_number, body=f"SafeHarbour: Share your location to dispatch your technician: {link}")
+        magiclink_state[call_sid] = {
+            "token": token,
+            "jti": token_resp.get("jti"),
+            "exp": token_resp.get("exp"),
+            "sent": True,
+            "user_confirmed": False,
+            "operator_confirmed": False,
+        }
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send magiclink SMS for {call_sid}: {e}")
+        return False
+
+# Operator-facing endpoints
+@app.get("/magiclink/status/{call_sid}")
+async def magiclink_status(call_sid: str):
+    state = magiclink_state.get(call_sid, {})
+    present = await _magiclink_check_status(call_sid)
+    return {"sid": call_sid, "sent": bool(state.get("sent")), "operator_confirmed": bool(state.get("operator_confirmed")), "location_present": bool(present)}
+
+@app.post("/magiclink/operator/confirm/{call_sid}")
+async def magiclink_operator_confirm(call_sid: str, request: Request):
+    # Optional API key enforcement
+    api_key = request.headers.get("x-api-key")
+    expected = os.getenv("MAGICLINK_OPERATOR_API_KEY") or settings.MAGICLINK_ADMIN_API_KEY
+    if expected and api_key != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+    st = magiclink_state.setdefault(call_sid, {})
+    st["operator_confirmed"] = True
+    # If user side is already confirmed (has location), finalize booking if possible
+    present = await _magiclink_check_status(call_sid)
+    if present:
+        await _finalize_booking_if_ready(call_sid)
+    return {"sid": call_sid, "operator_confirmed": True}
+
+@app.post("/magiclink/send/{call_sid}")
+async def magiclink_send(call_sid: str):
+    ok = await _send_magiclink_sms(call_sid)
+    if not ok:
+        raise HTTPException(status_code=500, detail="failed to send magiclink")
+    return {"status": "sent"}
+
+# Booking finalization helper
+async def _finalize_booking_if_ready(call_sid: str) -> bool:
+    try:
+        st = magiclink_state.get(call_sid, {})
+        operator_ok = bool(st.get("operator_confirmed"))
+        user_ok = await _magiclink_check_status(call_sid)
+        if not (operator_ok and user_ok):
+            return False
+        dialog = call_dialog_state.get(call_sid, {})
+        intent = dialog.get('intent', {})
+        suggested_time = dialog.get('suggested_time')
+        job_type = intent.get('job', {}).get('type', 'a plumbing issue')
+        customer = intent.get('customer', {})
+        phone = customer.get('phone') or call_info_store.get(call_sid, {}).get('from') or ''
+        name = customer.get('name') or 'Customer'
+        address = intent.get('location', {}).get('raw_address')
+        notes = intent.get('job', {}).get('description', '')
+        if suggested_time is None:
+            return False
+        book_scheduled_job(
+            phone=phone,
+            name=name,
+            service=job_type,
+            appointment_time=suggested_time,
+            address=address or '',
+            notes=notes,
+        )
+        logger.info(f"Booking finalized for {call_sid}")
+        return True
+    except Exception as e:
+        logger.error(f"Finalize booking failed for {call_sid}: {e}")
+        return False
+
+#---------------METRICS & WS (unchanged code below)---------------
+# ... existing code ...
+
 # Add endpoint to serve synthesized TTS audio for Twilio <Play>
 @app.get("/tts/{call_sid}.mp3")
 async def serve_tts(call_sid: str):
@@ -313,8 +464,6 @@ async def serve_twiml(call_sid: str):
     if not xml:
         raise HTTPException(status_code=404, detail="No TwiML available")
     return Response(content=xml, media_type="application/xml")
-
-twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
 
 #---------------VOICE WEBHOOK---------------
 # Helper to build WSS URL from incoming request host/proto, with safe fallbacks
@@ -1179,18 +1328,23 @@ async def push_twiml_to_call(call_sid: str, response: VoiceResponse):
          last_twiml_push_ts[call_sid] = now_ts
          logger.info(f"🔊 Pushing TwiML to call {call_sid}")
          logger.debug(f"Updating call {call_sid} with TwiML: {twiml_str}")
+         if twilio_client is None:
+             logger.warning("TwiML push skipped: Twilio client unavailable")
+             return
          loop = asyncio.get_event_loop()
          def _update():
-             return twilio_client.calls(call_sid).update(twiml=twiml_str)
+             return twilio_client.calls(call_sid).update(twiml=twiml_str)  # type: ignore[union-attr]
          result = await loop.run_in_executor(None, _update)
          logger.info(f"Pushed TwiML update to call {call_sid}; status={getattr(result, 'status', 'unknown')}")
      except Exception as e:
          logger.error(f"Failed to push TwiML directly to call {call_sid}: {e}; attempting URL fallback")
+         if twilio_client is None:
+             return
          try:
              url = f"{settings.EXTERNAL_WEBHOOK_URL}/twiml/{call_sid}"
              loop = asyncio.get_event_loop()
              def _update_url():
-                 return twilio_client.calls(call_sid).update(url=url, method="GET")
+                 return twilio_client.calls(call_sid).update(url=url, method="GET")  # type: ignore[union-attr]
              result = await loop.run_in_executor(None, _update_url)
              logger.info(f"Pushed TwiML via URL to call {call_sid}; status={getattr(result, 'status', 'unknown')} url={url}")
          except Exception as e2:
@@ -1580,40 +1734,80 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
     # If followup_text is provided, treat as user's response to scheduling prompt (no <Gather>, keep streaming)
     if followup_text:
         import dateutil.parser
-        text_norm = followup_text.lower().strip()
+        text_norm = (followup_text or '').lower().strip()
         state = call_dialog_state.get(call_sid, {}) or {}
+        # New: awaiting_location_confirm step
+        if state.get('step') == 'awaiting_location_confirm':
+            if any(k in text_norm for k in ['done', 'finished', 'completed', 'yes']):
+                present = await _magiclink_check_status(call_sid)
+                if present:
+                    # After location is received, ask to confirm the held time
+                    suggested_time = state.get('suggested_time')
+                    if isinstance(suggested_time, datetime):
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"Thanks, we received your location. Would you like me to book {_format_slot(suggested_time)}?"
+                        )
+                        state['step'] = 'awaiting_time_confirm'
+                        call_dialog_state[call_sid] = state
+                        append_stream_and_pause(twiml)
+                        return twiml
+                    # No time held; ask for date/time
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks, we received your location. Please say a date and time, like 'Friday at 3 PM'.")
+                    state['step'] = 'awaiting_time'
+                    call_dialog_state[call_sid] = state
+                    append_stream_and_pause(twiml)
+                    return twiml
+                else:
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I haven't received your location yet. Please open the link I texted and allow location access, then say 'done'.")
+                    append_stream_and_pause(twiml)
+                    return twiml
+        if state.get('step') == 'awaiting_operator_confirm':
+            finalized = await _finalize_booking_if_ready(call_sid)
+            if finalized:
+                await add_tts_or_say_to_twiml(twiml, call_sid, "Your appointment is now confirmed. Thank you!")
+                append_stream_and_pause(twiml)
+                return twiml
+            else:
+                await add_tts_or_say_to_twiml(twiml, call_sid, "We are awaiting final dispatcher confirmation. One moment.")
+                append_stream_and_pause(twiml)
+                return twiml
         # Confirmation step: user can confirm or change the suggested slot
         if state.get('step') == 'awaiting_time_confirm':
             if is_affirmative_response(followup_text):
                 suggested_time = state.get('suggested_time')
                 if isinstance(suggested_time, datetime):
-                    try:
-                        # Guard: require minimal customer name/phone before auto-booking
-                        if not customer_name:
-                            customer_name_local = "Customer"
-                        else:
-                            customer_name_local = customer_name
-                        if not customer_phone:
-                            # If we don't have a phone, do not book automatically
-                            raise ValueError("Missing customer phone for booking confirmation")
-                        book_scheduled_job(
-                            phone=customer_phone or '',
-                            name=customer_name_local,
-                            service=job_type,
-                            appointment_time=suggested_time,
-                            address=address,
-                            notes=notes
-                        )
+                    # If location is not yet present, (re)send link and gate on location first
+                    user_ok = await _magiclink_check_status(call_sid)
+                    if not user_ok:
+                        try:
+                            ok = await _send_magiclink_sms(call_sid)
+                            if ok:
+                                await add_tts_or_say_to_twiml(
+                                    twiml,
+                                    call_sid,
+                                    "I just sent a secure link to confirm your location. Please open it and allow location, then say 'done'."
+                                )
+                                state['step'] = 'awaiting_location_confirm'
+                                call_dialog_state[call_sid] = state
+                                append_stream_and_pause(twiml)
+                                return twiml
+                        except Exception as e:
+                            logger.error(f"Magiclink send failed for {call_sid}: {e}")
+                    # Try to finalize if operator already confirmed
+                    finalized = await _finalize_booking_if_ready(call_sid)
+                    if finalized:
                         await add_tts_or_say_to_twiml(
                             twiml,
                             call_sid,
                             f"Booked. Your {_speakable(job_type)} is set for {_format_slot(suggested_time)}."
                         )
                         call_dialog_state[call_sid] = {'intent': intent, 'step': 'post_booking_qa'}
-                    except Exception as e:
-                        logger.error(f"Booking confirmation failed: {e}")
-                        await add_tts_or_say_to_twiml(twiml, call_sid, "I can hold that time. To finalize, please confirm your name and the best callback phone number.")
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
+                    else:
+                        await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks. We have your location. Our dispatcher will confirm shortly.")
+                        state['step'] = 'awaiting_operator_confirm'
+                        call_dialog_state[call_sid] = state
                     append_stream_and_pause(twiml)
                     return twiml
             if is_negative_response(followup_text):
@@ -1630,10 +1824,19 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     end_time = newly_parsed + timedelta(hours=2)
                     events = calendar_adapter.get_events(start_date=newly_parsed, end_date=end_time)
                 if not events:
-                    await add_tts_or_say_to_twiml(twiml, call_sid, f"I can hold {_format_slot(newly_parsed)}. Should I book it?")
-                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': newly_parsed}
+                    # Send location link immediately and hold this time
+                    try:
+                        ok = await _send_magiclink_sms(call_sid)
+                    except Exception:
+                        ok = False
+                    if ok:
+                        await add_tts_or_say_to_twiml(twiml, call_sid, f"I can hold {_format_slot(newly_parsed)}. I sent a secure link to confirm your location. Please open it and say 'done'.")
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': newly_parsed}
+                    else:
+                        await add_tts_or_say_to_twiml(twiml, call_sid, f"I can hold {_format_slot(newly_parsed)}. Should I book it?")
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': newly_parsed}
                 else:
-                    # Suggest next available 2h window
+                    # Suggest next available 2h window and send location link
                     next_available = newly_parsed + timedelta(hours=2)
                     if getattr(calendar_adapter, 'enabled', False):
                         for i in range(1, 8):
@@ -1643,8 +1846,16 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                             if not slot_events:
                                 next_available = slot_start
                                 break
-                    await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?")
-                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
+                    try:
+                        ok = await _send_magiclink_sms(call_sid)
+                    except Exception:
+                        ok = False
+                    if ok:
+                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. I sent a link to confirm your location; please open it and say 'done'.")
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': next_available}
+                    else:
+                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?")
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
                 append_stream_and_pause(twiml)
                 return twiml
         # Path choice handling first
@@ -1664,12 +1875,25 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                             if not events:
                                 suggested = slot_start
                                 break
-                    await add_tts_or_say_to_twiml(
-                        twiml,
-                        call_sid,
-                        f"Understood. The closest available slot is {_format_slot(suggested)}. Would you like me to book that?"
-                    )
-                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
+                    # Send location link immediately and hold this time
+                    try:
+                        ok = await _send_magiclink_sms(call_sid)
+                    except Exception:
+                        ok = False
+                    if ok:
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"Understood. The closest available slot is {_format_slot(suggested)}. I sent a secure link to confirm your location. Please open it and say 'done'."
+                        )
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': suggested}
+                    else:
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"Understood. The closest available slot is {_format_slot(suggested)}. Should I book that?"
+                        )
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
                 except Exception as e:
                     logger.error(f"Emergency path suggestion failed: {e}")
                     await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
@@ -1697,15 +1921,27 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                         end_time = preferred_time + timedelta(hours=2)
                         events = calendar_adapter.get_events(start_date=start_time, end_date=end_time)
                     if not events:
-                        # Recognize suggestion, do not book yet
-                        await add_tts_or_say_to_twiml(
-                            twiml,
-                            call_sid,
-                            f"Thanks. I can hold {_format_slot(start_time)} for your {_speakable(job_type)}. Should I book it?"
-                        )
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': start_time}
+                        # Hold time and send location link immediately
+                        try:
+                            ok = await _send_magiclink_sms(call_sid)
+                        except Exception:
+                            ok = False
+                        if ok:
+                            await add_tts_or_say_to_twiml(
+                                twiml,
+                                call_sid,
+                                f"Thanks. I can hold {_format_slot(start_time)} for your {_speakable(job_type)}. I sent a secure link to confirm your location. Please open it and say 'done'."
+                            )
+                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': start_time}
+                        else:
+                            await add_tts_or_say_to_twiml(
+                                twiml,
+                                call_sid,
+                                f"Thanks. I can hold {_format_slot(start_time)} for your {_speakable(job_type)}. Should I book it?"
+                            )
+                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': start_time}
                     else:
-                        # Suggest next available, do not book yet
+                        # Suggest next available, send location link
                         next_available = start_time + timedelta(hours=2)
                         if getattr(calendar_adapter, 'enabled', False):
                             for i in range(1, 8):
@@ -1715,12 +1951,24 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                                 if not slot_events:
                                     next_available = slot_start
                                     break
-                        await add_tts_or_say_to_twiml(
-                            twiml,
-                            call_sid,
-                            f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?"
-                        )
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
+                        try:
+                            ok = await _send_magiclink_sms(call_sid)
+                        except Exception:
+                            ok = False
+                        if ok:
+                            await add_tts_or_say_to_twiml(
+                                twiml,
+                                call_sid,
+                                f"That time looks busy. The next available is {_format_slot(next_available)}. I sent a secure link to confirm your location. Please open it and say 'done'."
+                            )
+                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': next_available}
+                        else:
+                            await add_tts_or_say_to_twiml(
+                                twiml,
+                                call_sid,
+                                f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?"
+                            )
+                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
                 except Exception as e:
                     logger.error(f"Scheduling suggestion failed: {e}")
                     await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble checking availability right now. I can connect you to a human if you prefer.")
@@ -1751,8 +1999,17 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     if not events:
                         suggested = slot_start
                         break
-            await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Should I book that?")
-            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
+            # Send magiclink immediately and hold this time
+            try:
+                ok = await _send_magiclink_sms(call_sid)
+            except Exception:
+                ok = False
+            if ok:
+                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. I sent a secure link to confirm your location. Please open it and say 'done'.")
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': suggested}
+            else:
+                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Should I book that?")
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
         except Exception as e:
             logger.error(f"Emergency slot suggestion failed: {e}")
             await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
