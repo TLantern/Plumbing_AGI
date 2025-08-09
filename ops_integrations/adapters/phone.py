@@ -17,6 +17,7 @@ import io
 import wave
 from openai import OpenAI
 from collections import defaultdict
+import re
 # Replace direct relative imports with dual-mode imports (package + script fallback)
 try:
     from .plumbing_services import (
@@ -129,6 +130,9 @@ call_info_store = {}
 tts_audio_store: dict[str, bytes] = {}
 # Store last TwiML per call for fallback delivery via URL
 last_twiml_store: dict[str, str] = {}
+# Track last TwiML push timestamp to throttle rapid updates
+last_twiml_push_ts: dict[str, float] = {}
+TWIML_PUSH_MIN_INTERVAL_SEC = 1.5
 
 # Live Ops metrics aggregation and websocket clients
 from collections import deque
@@ -972,9 +976,9 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             await push_twiml_to_call(call_sid, twiml)
             return
 
-        # Scheduling follow-up handling
-        if dialog and dialog.get('step') in ('awaiting_time', 'awaiting_time_confirm'):
-            logger.info(f"Handling follow-up scheduling utterance for {call_sid}: '{text}'")
+        # Scheduling/path follow-up handling
+        if dialog and dialog.get('step') in ('awaiting_path_choice', 'awaiting_time', 'awaiting_time_confirm'):
+            logger.info(f"Handling follow-up scheduling/path utterance for {call_sid}: '{text}'")
             twiml = await handle_intent(call_sid, dialog.get('intent', {}), followup_text=text)
             await push_twiml_to_call(call_sid, twiml)
             return
@@ -1141,7 +1145,7 @@ async def synthesize_tts(text: str) -> Optional[bytes]:
         return None
 
 async def add_tts_or_say_to_twiml(target, call_sid: str, text: str):
-    speak_text = text.replace("_", " underscore ")
+    speak_text = text.replace("_", " ")
     if settings.FORCE_SAY_ONLY:
         logger.info(f"FORCE_SAY_ONLY enabled; using <Say> for CallSid={call_sid}")
         target.say(speak_text)
@@ -1158,27 +1162,39 @@ async def add_tts_or_say_to_twiml(target, call_sid: str, text: str):
 
 # Push updated TwiML mid-call to Twilio
 async def push_twiml_to_call(call_sid: str, response: VoiceResponse):
-    try:
-        twiml_str = str(response)
-        last_twiml_store[call_sid] = twiml_str
-        logger.info(f"🔊 Pushing TwiML to call {call_sid}")
-        logger.debug(f"Updating call {call_sid} with TwiML: {twiml_str}")
-        loop = asyncio.get_event_loop()
-        def _update():
-            return twilio_client.calls(call_sid).update(twiml=twiml_str)
-        result = await loop.run_in_executor(None, _update)
-        logger.info(f"Pushed TwiML update to call {call_sid}; status={getattr(result, 'status', 'unknown')}")
-    except Exception as e:
-        logger.error(f"Failed to push TwiML directly to call {call_sid}: {e}; attempting URL fallback")
-        try:
-            url = f"{settings.EXTERNAL_WEBHOOK_URL}/twiml/{call_sid}"
-            loop = asyncio.get_event_loop()
-            def _update_url():
-                return twilio_client.calls(call_sid).update(url=url, method="GET")
-            result = await loop.run_in_executor(None, _update_url)
-            logger.info(f"Pushed TwiML via URL to call {call_sid}; status={getattr(result, 'status', 'unknown')} url={url}")
-        except Exception as e2:
-            logger.error(f"URL fallback also failed for call {call_sid}: {e2}")
+     try:
+         twiml_str = str(response)
+         # Skip if identical to last TwiML pushed
+         prev = last_twiml_store.get(call_sid)
+         now_ts = time.time()
+         if prev == twiml_str:
+             logger.info(f"Skipping TwiML push for {call_sid}: identical to last")
+             return
+         # Throttle frequent pushes
+         last_ts = last_twiml_push_ts.get(call_sid, 0)
+         if now_ts - last_ts < TWIML_PUSH_MIN_INTERVAL_SEC:
+             logger.info(f"Throttling TwiML push for {call_sid}: pushed {now_ts - last_ts:.2f}s ago")
+             return
+         last_twiml_store[call_sid] = twiml_str
+         last_twiml_push_ts[call_sid] = now_ts
+         logger.info(f"🔊 Pushing TwiML to call {call_sid}")
+         logger.debug(f"Updating call {call_sid} with TwiML: {twiml_str}")
+         loop = asyncio.get_event_loop()
+         def _update():
+             return twilio_client.calls(call_sid).update(twiml=twiml_str)
+         result = await loop.run_in_executor(None, _update)
+         logger.info(f"Pushed TwiML update to call {call_sid}; status={getattr(result, 'status', 'unknown')}")
+     except Exception as e:
+         logger.error(f"Failed to push TwiML directly to call {call_sid}: {e}; attempting URL fallback")
+         try:
+             url = f"{settings.EXTERNAL_WEBHOOK_URL}/twiml/{call_sid}"
+             loop = asyncio.get_event_loop()
+             def _update_url():
+                 return twilio_client.calls(call_sid).update(url=url, method="GET")
+             result = await loop.run_in_executor(None, _update_url)
+             logger.info(f"Pushed TwiML via URL to call {call_sid}; status={getattr(result, 'status', 'unknown')} url={url}")
+         except Exception as e2:
+             logger.error(f"URL fallback also failed for call {call_sid}: {e2}")
 
 def extract_phone_number(text: str) -> str:
     """Extract phone number from text"""
@@ -1305,6 +1321,186 @@ def is_negative_response(text: str) -> bool:
             return True
     return False
 
+# Positive/affirmative detection
+AFFIRMATIVE_PATTERNS = {
+    "yes", "yeah", "yep", "affirmative", "correct", "that works", "sounds good", "please do",
+    "book it", "go ahead", "confirm", "let's do it", "schedule it", "do it"
+}
+
+def is_affirmative_response(text: str) -> bool:
+    norm = " ".join((text or "").lower().strip().strip(".,!?").split())
+    if norm in AFFIRMATIVE_PATTERNS:
+        return True
+    # Token-based checks
+    words = norm.split()
+    # Short generic confirmations only (avoid long sentences like "yeah, my ...")
+    if len(words) <= 3 and words[0] in {"yes", "yeah", "yep", "yup", "ok", "okay", "sure", "correct", "affirmative"}:
+        return True
+    # Explicit booking/confirmation phrases anywhere in the utterance
+    explicit_patterns = [
+        r"\bbook(\s+it|\s+that)?\b",
+        r"\bconfirm\b",
+        r"\bschedule(\s+it)?\b",
+        r"\bgo ahead\b",
+        r"\bthat works\b",
+        r"\bsounds good\b",
+        r"\blet'?s do it\b",
+        r"\bdo it\b",
+        r"\bplease book\b",
+    ]
+    for pat in explicit_patterns:
+        if re.search(pat, norm):
+            return True
+    return False
+
+def _speakable(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    return " ".join(text.replace("_", " ").split())
+
+def _format_slot(dt: datetime) -> str:
+    # Format: Month D at H:MM AM/PM (no year)
+    month = dt.strftime("%B")
+    day = str(dt.day)
+    time_part = dt.strftime("%I:%M %p").lstrip("0")
+    return f"{month} {day} at {time_part}"
+
+def _normalize_relative_datetime_phrases(text: str, now: datetime) -> str:
+    norm = text
+    # Normalize possessives like "today's", "tuesday's"
+    norm = re.sub(r"\b(today)'?s\b", r"\1", norm, flags=re.I)
+    norm = re.sub(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)'?s\b", r"\1", norm, flags=re.I)
+
+    # Handle today/tomorrow/tonight
+    if re.search(r"\btomorrow\b", norm, re.I):
+        d = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        norm = re.sub(r"\btomorrow\b", d, norm, flags=re.I)
+    if re.search(r"\btoday\b", norm, re.I):
+        d = now.strftime("%Y-%m-%d")
+        norm = re.sub(r"\btoday\b", d, norm, flags=re.I)
+    if re.search(r"\btonight\b", norm, re.I):
+        d = now.strftime("%Y-%m-%d")
+        norm = re.sub(r"\btonight\b", f"{d} 7 pm", norm, flags=re.I)
+
+    # Handle "in N days/weeks/hours" (digits or words)
+    number_words = {
+        'zero': 0, 'one': 1, 'a': 1, 'an': 1, 'two': 2, 'couple': 2, 'three': 3, 'four': 4, 'five': 5,
+        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10, 'eleven': 11, 'twelve': 12, 'thirteen': 13,
+        'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19,
+        'twenty': 20, 'thirty': 30
+    }
+
+    def repl_in_duration(m: re.Match) -> str:
+        qty_str = m.group(1).lower()
+        unit = m.group(2).lower()
+        if qty_str.isdigit():
+            qty = int(qty_str)
+        else:
+            qty = number_words.get(qty_str)
+        if qty is None:
+            return m.group(0)
+        if unit.startswith('hour'):
+            target = now + timedelta(hours=qty)
+            return target.strftime('%Y-%m-%d %H:%M')
+        if unit.startswith('week'):
+            target = now + timedelta(days=qty * 7)
+            return target.strftime('%Y-%m-%d')
+        # default days
+        target = now + timedelta(days=qty)
+        return target.strftime('%Y-%m-%d')
+
+    norm = re.sub(r"\bin\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|a|an|couple)\s+(day|days|week|weeks|hour|hours)\b",
+                   repl_in_duration, norm, flags=re.I)
+
+    # Handle parts of day when no explicit time provided
+    norm = re.sub(r"\bmorning\b", "9 am", norm, flags=re.I)
+    norm = re.sub(r"\bafternoon\b", "2 pm", norm, flags=re.I)
+    norm = re.sub(r"\bevening\b", "6 pm", norm, flags=re.I)
+
+    # Weekday handling
+    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+    def date_for_weekday(name: str, use_next: bool) -> str:
+        wd = days.index(name)
+        delta = (wd - now.weekday()) % 7
+        if delta == 0:
+            delta = 7 if use_next else 0
+        target = now + timedelta(days=delta)
+        return target.strftime("%Y-%m-%d")
+
+    # next <weekday>
+    for dname in days:
+        norm = re.sub(rf"\bnext\s+{dname}\b", date_for_weekday(dname, True), norm, flags=re.I)
+    # this <weekday>
+    for dname in days:
+        norm = re.sub(rf"\bthis\s+{dname}\b", date_for_weekday(dname, False), norm, flags=re.I)
+    # bare weekday → pick next occurrence if same-day has likely passed
+    for dname in days:
+        norm = re.sub(rf"\b{dname}\b", date_for_weekday(dname, False), norm, flags=re.I)
+
+    return norm
+
+
+def parse_human_datetime(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
+    try:
+        from dateutil import parser as _dtparser  # lazy import
+    except Exception:
+        return None
+    if now is None:
+        now = datetime.now()
+    prepared = _normalize_relative_datetime_phrases(text, now)
+    try:
+        dt = _dtparser.parse(prepared, fuzzy=True, default=now)
+        return dt
+    except Exception:
+        return None
+
+
+def gpt_infer_datetime_phrase(text: str, now_dt: Optional[datetime] = None) -> Optional[datetime]:
+    try:
+        if now_dt is None:
+            now_dt = datetime.now()
+        system = (
+            "You extract a single scheduling datetime from a short phrase. "
+            "Use the provided NOW as the reference for relative expressions. "
+            "Return a compact JSON object only."
+        )
+        user = json.dumps({
+            "now": now_dt.strftime("%Y-%m-%d %H:%M"),
+            "phrase": text,
+            "format": "YYYY-MM-DD HH:MM"
+        })
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": (
+                    "Given NOW and a phrase, respond with JSON: {\"iso\": \"YYYY-MM-DD HH:MM\"}. "
+                    "If no time given, choose 3:00 PM. If only part of day given, pick within that (morning=9:00 AM, afternoon=2:00 PM, evening=6:00 PM). "
+                    "If weekday given, pick the next occurrence. If the phrase implies the past, move to the next future occurrence. "
+                    "Do not include any other keys.\n\n" + user
+                )}
+            ],
+            temperature=0,
+            max_tokens=60,
+        )
+        content = resp.choices[0].message.content or ""
+        iso_str = None
+        try:
+            data = json.loads(content)
+            iso_str = data.get("iso")
+        except Exception:
+            m = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})", content)
+            if m:
+                iso_str = m.group(1)
+        if not iso_str:
+            return None
+        from dateutil import parser as _dtparser  # type: ignore
+        return _dtparser.parse(iso_str)
+    except Exception as e:
+        logger.debug(f"GPT datetime inference failed: {e}")
+        return None
+
 async def answer_customer_question(call_sid: str, text: str) -> str:
     try:
         system_prompt = (
@@ -1384,77 +1580,191 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
     # If followup_text is provided, treat as user's response to scheduling prompt (no <Gather>, keep streaming)
     if followup_text:
         import dateutil.parser
-        try:
-            preferred_time = dateutil.parser.parse(followup_text, fuzzy=True)
-        except Exception:
-            preferred_time = None
-        if preferred_time:
-            try:
-                start_time = preferred_time
-                # Use calendar adapter only if available
+        text_norm = followup_text.lower().strip()
+        state = call_dialog_state.get(call_sid, {}) or {}
+        # Confirmation step: user can confirm or change the suggested slot
+        if state.get('step') == 'awaiting_time_confirm':
+            if is_affirmative_response(followup_text):
+                suggested_time = state.get('suggested_time')
+                if isinstance(suggested_time, datetime):
+                    try:
+                        # Guard: require minimal customer name/phone before auto-booking
+                        if not customer_name:
+                            customer_name_local = "Customer"
+                        else:
+                            customer_name_local = customer_name
+                        if not customer_phone:
+                            # If we don't have a phone, do not book automatically
+                            raise ValueError("Missing customer phone for booking confirmation")
+                        book_scheduled_job(
+                            phone=customer_phone or '',
+                            name=customer_name_local,
+                            service=job_type,
+                            appointment_time=suggested_time,
+                            address=address,
+                            notes=notes
+                        )
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"Booked. Your {_speakable(job_type)} is set for {_format_slot(suggested_time)}."
+                        )
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'post_booking_qa'}
+                    except Exception as e:
+                        logger.error(f"Booking confirmation failed: {e}")
+                        await add_tts_or_say_to_twiml(twiml, call_sid, "I can hold that time. To finalize, please confirm your name and the best callback phone number.")
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
+                    append_stream_and_pause(twiml)
+                    return twiml
+            if is_negative_response(followup_text):
+                await add_tts_or_say_to_twiml(twiml, call_sid, "Okay. Tell me another date and time that works, or say 'earliest'.")
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+                append_stream_and_pause(twiml)
+                return twiml
+            # If user provided a new date/time at confirmation step, re-parse and re-suggest
+            newly_parsed = parse_human_datetime(followup_text)
+            if newly_parsed:
                 calendar_adapter = CalendarAdapter()
                 events = []
                 if getattr(calendar_adapter, 'enabled', False):
-                    end_time = preferred_time + timedelta(hours=2)
-                    events = calendar_adapter.get_events(start_date=start_time, end_date=end_time)
+                    end_time = newly_parsed + timedelta(hours=2)
+                    events = calendar_adapter.get_events(start_date=newly_parsed, end_date=end_time)
                 if not events:
-                    book_scheduled_job(
-                        phone=customer_phone or '',
-                        name=customer_name,
-                        service=job_type,
-                        appointment_time=start_time,
-                        address=address,
-                        notes=notes
-                    )
-                    await add_tts_or_say_to_twiml(twiml, call_sid, f"Your appointment for {job_type} is scheduled at {start_time.strftime('%Y-%m-%d %H:%M')}. Thanks for trusting SafeHarbour to help you with your plumbing needs. Please let me know if you have any other questions.")
-                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'post_booking_qa'}
+                    await add_tts_or_say_to_twiml(twiml, call_sid, f"I can hold {_format_slot(newly_parsed)}. Should I book it?")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': newly_parsed}
                 else:
-                    next_available = start_time + timedelta(hours=2)
+                    # Suggest next available 2h window
+                    next_available = newly_parsed + timedelta(hours=2)
                     if getattr(calendar_adapter, 'enabled', False):
                         for i in range(1, 8):
-                            slot_start = start_time + timedelta(hours=2*i)
+                            slot_start = newly_parsed + timedelta(hours=2*i)
                             slot_end = slot_start + timedelta(hours=2)
                             slot_events = calendar_adapter.get_events(start_date=slot_start, end_date=slot_end)
                             if not slot_events:
                                 next_available = slot_start
                                 break
-                    await add_tts_or_say_to_twiml(twiml, call_sid, f"The requested time is unavailable. The next available slot is {next_available.strftime('%Y-%m-%d %H:%M')}.")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?")
                     call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
-            except Exception as e:
-                logger.error(f"Scheduling failed: {e}")
-                await add_tts_or_say_to_twiml(twiml, call_sid, "We're having trouble checking availability. Please hold while we connect you to a human agent.")
-                call_dialog_state.pop(call_sid, None)
-        else:
-            await add_tts_or_say_to_twiml(twiml, call_sid, "I didn't catch a valid date and time. Please repeat the date and time you'd like to schedule, or say 'anytime'.")
-            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+                append_stream_and_pause(twiml)
+                return twiml
+        # Path choice handling first
+        if call_dialog_state.get(call_sid, {}).get('step') == 'awaiting_path_choice':
+            if any(k in text_norm for k in ['emergency', 'urgent', 'immediately']):
+                # Immediate path: choose closest slot, do not book yet
+                try:
+                    calendar_adapter = CalendarAdapter()
+                    now = datetime.now()
+                    suggested = now + timedelta(hours=1)
+                    if getattr(calendar_adapter, 'enabled', False):
+                        # Find nearest 2h slot with no events
+                        for i in range(0, 24):
+                            slot_start = now + timedelta(hours=i)
+                            slot_end = slot_start + timedelta(hours=2)
+                            events = calendar_adapter.get_events(start_date=slot_start, end_date=slot_end)
+                            if not events:
+                                suggested = slot_start
+                                break
+                    await add_tts_or_say_to_twiml(
+                        twiml,
+                        call_sid,
+                        f"Understood. The closest available slot is {_format_slot(suggested)}. Would you like me to book that?"
+                    )
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
+                except Exception as e:
+                    logger.error(f"Emergency path suggestion failed: {e}")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
+                append_stream_and_pause(twiml)
+                logger.info(f"Handled path choice (emergency) for CallSid={call_sid}")
+                return twiml
+            elif any(k in text_norm for k in ['schedule', 'book', 'technician', 'come check', 'come out', 'appointment']):
+                await add_tts_or_say_to_twiml(twiml, call_sid, f"Great. If you have a date and time in mind, tell me now, otherwise I can suggest the earliest available.")
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+                append_stream_and_pause(twiml)
+                logger.info(f"Handled path choice (schedule) for CallSid={call_sid}")
+                return twiml
+        # If user gives a date/time directly, recognize but don't book yet
+        try:
+            preferred_time = parse_human_datetime(followup_text)
+            if not preferred_time:
+                preferred_time = gpt_infer_datetime_phrase(followup_text)
+            if preferred_time:
+                try:
+                    start_time = preferred_time
+                    calendar_adapter = CalendarAdapter()
+                    events = []
+                    if getattr(calendar_adapter, 'enabled', False):
+                        end_time = preferred_time + timedelta(hours=2)
+                        events = calendar_adapter.get_events(start_date=start_time, end_date=end_time)
+                    if not events:
+                        # Recognize suggestion, do not book yet
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"Thanks. I can hold {_format_slot(start_time)} for your {_speakable(job_type)}. Should I book it?"
+                        )
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': start_time}
+                    else:
+                        # Suggest next available, do not book yet
+                        next_available = start_time + timedelta(hours=2)
+                        if getattr(calendar_adapter, 'enabled', False):
+                            for i in range(1, 8):
+                                slot_start = start_time + timedelta(hours=2*i)
+                                slot_end = slot_start + timedelta(hours=2)
+                                slot_events = calendar_adapter.get_events(start_date=slot_start, end_date=slot_end)
+                                if not slot_events:
+                                    next_available = slot_start
+                                    break
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?"
+                        )
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
+                except Exception as e:
+                    logger.error(f"Scheduling suggestion failed: {e}")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble checking availability right now. I can connect you to a human if you prefer.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
+                append_stream_and_pause(twiml)
+                logger.info(f"Handled followup date/time recognition for CallSid={call_sid}")
+                return twiml
+        except Exception as e:
+            logger.error(f"Datetime parsing failed: {e}")
+        # Prompt again if nothing parsed
+        await add_tts_or_say_to_twiml(twiml, call_sid, "Please say a date and time, like 'Friday at 3 PM', or say 'earliest'.")
+        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
         append_stream_and_pause(twiml)
-        logger.info(f"Handled followup scheduling for CallSid={call_sid}")
+        logger.info(f"Handled followup prompting for CallSid={call_sid}")
         return twiml
 
     # Initial intent handling (no <Gather>; we keep streaming and listen continuously)
     if urgency == 'emergency':
         try:
-            booking_result = book_emergency_job(
-                phone=customer_phone or '',
-                name=customer_name,
-                service=job_type,
-                address=address,
-                notes=notes
-            )
-            appointment_time = booking_result.get('appointment_time')
-            if not appointment_time:
-                appointment_time = (datetime.now() + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M')
-            await add_tts_or_say_to_twiml(twiml, call_sid, f"This is an emergency. We'll send the best available technician for {job_type} at the next available slot: {appointment_time}.")
-            # Transition to post-booking Q&A prompt
-            await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks for trusting SafeHarbour to help you with your plumbing needs. Please let me know if you have any other questions.")
-            call_dialog_state[call_sid] = {'intent': intent, 'step': 'post_booking_qa'}
+            calendar_adapter = CalendarAdapter()
+            now = datetime.now()
+            suggested = now + timedelta(hours=1)
+            if getattr(calendar_adapter, 'enabled', False):
+                for i in range(0, 24):
+                    slot_start = now + timedelta(hours=i)
+                    slot_end = slot_start + timedelta(hours=2)
+                    events = calendar_adapter.get_events(start_date=slot_start, end_date=slot_end)
+                    if not events:
+                        suggested = slot_start
+                        break
+            await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Should I book that?")
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
         except Exception as e:
-            logger.error(f"Emergency booking failed: {e}")
-            await add_tts_or_say_to_twiml(twiml, call_sid, "We're having trouble booking the next available technician. Please hold while we connect you to a human agent.")
-            call_dialog_state.pop(call_sid, None)
+            logger.error(f"Emergency slot suggestion failed: {e}")
+            await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
     else:
-        await add_tts_or_say_to_twiml(twiml, call_sid, f"Got it. For your {job_type}, what date and time works best?")
-        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+        # Ask for path: emergency vs schedule
+        await add_tts_or_say_to_twiml(
+            twiml,
+            call_sid,
+            f"Got it. For your {_speakable(job_type)}, is this an emergency, or would you like to book a technician to come check it out?"
+        )
+        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
     append_stream_and_pause(twiml)
     logger.info(f"Handled intent {intent} for CallSid={call_sid}")
     return twiml

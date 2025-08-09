@@ -31,10 +31,32 @@ except ImportError:
 BERT_MODEL = None
 if BERT_AVAILABLE:
     try:
-        BERT_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
+        model_name = os.getenv("SENTENCE_TRANSFORMERS_MODEL", "all-MiniLM-L6-v2")
+        model_path_override = os.getenv("SENTENCE_TRANSFORMERS_MODEL_PATH", "").strip()
+        if model_path_override and os.path.isdir(model_path_override):
+            BERT_MODEL = SentenceTransformer(model_path_override)
+        else:
+            BERT_MODEL = SentenceTransformer(model_name)
     except Exception as e:
-        print(f"Warning: Could not initialize BERT model: {e}")
-        BERT_AVAILABLE = False
+        # Fallback: try loading from local HF cache (offline)
+        try:
+            import glob
+            cache_home = os.getenv("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
+            model_cache_dir = f"models--sentence-transformers--{model_name.replace('/', '--')}"
+            snapshots_glob = os.path.join(cache_home, "hub", model_cache_dir, "snapshots", "*")
+            candidates = sorted(glob.glob(snapshots_glob))
+            if candidates:
+                offline_path = candidates[-1]
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                os.environ["TRANSFORMERS_OFFLINE"] = "1"
+                BERT_MODEL = SentenceTransformer(offline_path)
+                print(f"Loaded BERT model from local cache: {offline_path}")
+            else:
+                print(f"Warning: Could not initialize BERT model: {e}")
+                BERT_AVAILABLE = False
+        except Exception as e2:
+            print(f"Warning: Could not initialize BERT model (offline fallback failed): {e}; {e2}")
+            BERT_AVAILABLE = False
 
 # All available plumbing service types
 PLUMBING_SERVICES = [
