@@ -57,6 +57,12 @@ import struct
 import time
 import httpx
 
+# Import prompt for intent classification
+try:
+    from ..prompts.prompt_layer import INTENT_CLASSIFICATION_PROMPT
+except Exception:
+    from prompts.prompt_layer import INTENT_CLASSIFICATION_PROMPT
+
 # Try to import audioop for mu-law decoding and resampling; may be missing on some Python versions
 try:
     import audioop as _audioop  # type: ignore
@@ -88,8 +94,11 @@ class Settings(BaseSettings):
     MAGICLINK_API_BASE: str = os.getenv("MAGICLINK_API_BASE", "http://localhost:8000")
     MAGICLINK_APP_URL: str = os.getenv("MAGICLINK_APP_URL", "http://localhost:3000/location")
     MAGICLINK_ADMIN_API_KEY: Optional[str] = os.getenv("MAGICLINK_ADMIN_API_KEY")
+    MAGICLINK_BYPASS_LOCATION: bool = True
     # Accept either TWILIO_SMS_FROM or TWILIO_FROM_NUMBER for convenience
     TWILIO_SMS_FROM: Optional[str] = os.getenv("TWILIO_SMS_FROM") or os.getenv("TWILIO_FROM_NUMBER")
+    # Human dispatcher transfer number
+    DISPATCH_NUMBER: str = os.getenv("DISPATCH_NUMBER", "+14693096560")
 
 settings = Settings()
 
@@ -310,11 +319,16 @@ async def _broadcast_ops_metrics():
 async def _broadcast_transcript(call_sid: str, text: str):
     if not ops_ws_clients:
         return
+    
+    # Classify intent for the transcript text
+    intent = await classify_transcript_intent(text)
+    
     payload = {
         "type": "transcript",
         "data": {
             "callSid": call_sid,
             "text": text,
+            "intent": intent,
             "ts": datetime.utcnow().isoformat() + "Z",
         },
     }
@@ -331,6 +345,39 @@ async def _broadcast_transcript(call_sid: str, text: str):
             ops_ws_clients.discard(ws)
         except Exception:
             pass
+
+
+async def classify_transcript_intent(text: str) -> str:
+    """Classify the intent of a transcript text using GPT-3.5-turbo."""
+    try:
+        # Skip classification for very short texts
+        if len(text.strip()) < 5:
+            return "GENERAL_INQUIRY"
+            
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": INTENT_CLASSIFICATION_PROMPT},
+                {"role": "user", "content": text}
+            ],
+            max_tokens=20,
+            temperature=0.1  # Low temperature for deterministic results
+        )
+        
+        intent = response.choices[0].message.content.strip().upper()
+        
+        # Validate that the intent is one we recognize
+        from ops_integrations.flows.intents import get_intent_tags
+        valid_intents = get_intent_tags()
+        if intent in valid_intents:
+            return intent
+        else:
+            logger.debug(f"Unknown intent returned: {intent}, falling back to GENERAL_INQUIRY")
+            return "GENERAL_INQUIRY"
+            
+    except Exception as e:
+        logger.debug(f"Error classifying transcript intent: {e}")
+        return "GENERAL_INQUIRY"
 
 
 # New: broadcast job description to ops dashboard when booking is ready
@@ -395,54 +442,37 @@ async def _magiclink_mint_token(call_sid: str) -> dict:
         return r.json()
 
 async def _magiclink_check_status(call_sid: str) -> bool:
-    if not settings.MAGICLINK_ADMIN_API_KEY:
-        return False
-    url = f"{settings.MAGICLINK_API_BASE}/admin/calls/{call_sid}/location/status"
-    async with httpx.AsyncClient(timeout=10) as http:
-        r = await http.get(url, headers={"x-api-key": settings.MAGICLINK_ADMIN_API_KEY})
-        if r.status_code != 200:
-            return False
-        data = r.json()
-        return bool(data.get("present"))
+    """Return True when bypass is enabled, otherwise check mocked confirmation."""
+    # Temporary compliance bypass: auto-accept location when enabled
+    if getattr(settings, "MAGICLINK_BYPASS_LOCATION", False):
+        logger.info(f"🗺️ BYPASS: Location auto-confirmed for {call_sid}")
+        return True
+    state = magiclink_state.get(call_sid, {})
+    # If this is a mocked session and user has confirmed, return True
+    if state.get("mocked") and state.get("user_confirmed"):
+        logger.info(f"🗺️ MOCK: Location confirmed for {call_sid}")
+        return True
+    # Otherwise return False (no location yet)
+    return False
 
 async def _send_magiclink_sms(call_sid: str) -> bool:
+    """Mock SMS sending - return success without actually sending for A2P approval wait"""
     try:
-        token_resp = await _magiclink_mint_token(call_sid)
+        # Mock the token response
+        token_resp = {
+            "token": f"mock_token_{call_sid}",
+            "jti": f"mock_jti_{call_sid}",
+            "exp": int(time.time()) + 3600
+        }
         token = token_resp.get("token")
-        if not token:
-            return False
-        link = f"{settings.MAGICLINK_APP_URL}?token={token}"
+        
         call_info = call_info_store.get(call_sid, {})
         to_number = call_info.get("from")
         from_number = settings.TWILIO_SMS_FROM or call_info.get("to")
-        if not to_number or not from_number:
-            logger.error(f"SMS send failed: missing to/from numbers for CallSid={call_sid}")
-            return False
-        if twilio_client is None:
-            logger.warning("SMS send skipped: Twilio client unavailable")
-            return False
-        if not settings.TWILIO_SMS_FROM:
-            logger.warning("Using voice 'To' number as SMS sender; set TWILIO_SMS_FROM to an SMS-capable number for reliability")
-
-        # Derive a public callback URL for Twilio delivery status from ws_base when available
-        status_callback_url = None
-        try:
-            ws_base = call_info.get("ws_base")
-            if isinstance(ws_base, str) and ws_base:
-                if ws_base.startswith("wss://"):
-                    status_callback_url = "https://" + ws_base[len("wss://"):]
-                elif ws_base.startswith("ws://"):
-                    status_callback_url = "http://" + ws_base[len("ws://"):]
-                if status_callback_url:
-                    status_callback_url = status_callback_url.rstrip("/") + "/twilio/sms/status"
-        except Exception:
-            status_callback_url = None
-
-        kwargs = {"to": to_number, "from_": from_number, "body": f"SafeHarbour: Share your location to dispatch your technician: {link}"}
-        if status_callback_url:
-            kwargs["status_callback"] = status_callback_url
-        msg = twilio_client.messages.create(**kwargs)
-        logger.info(f"Magiclink SMS sent to {to_number} from {from_number}; sid={getattr(msg, 'sid', None)}")
+        
+        # Mock successful SMS send
+        logger.info(f"🔗 MOCK: Magiclink SMS would be sent to {to_number} from {from_number} (A2P approval pending)")
+        
         magiclink_state[call_sid] = {
             "token": token,
             "jti": token_resp.get("jti"),
@@ -450,10 +480,11 @@ async def _send_magiclink_sms(call_sid: str) -> bool:
             "sent": True,
             "user_confirmed": False,
             "operator_confirmed": False,
+            "mocked": True  # Flag to indicate this was mocked
         }
         return True
     except Exception as e:
-        logger.error(f"Failed to send magiclink SMS for {call_sid}: {e}")
+        logger.error(f"Failed to mock magiclink SMS for {call_sid}: {e}")
         return False
 
 # Operator-facing endpoints
@@ -470,15 +501,50 @@ async def magiclink_operator_confirm(call_sid: str, request: Request):
     expected = os.getenv("MAGICLINK_OPERATOR_API_KEY") or settings.MAGICLINK_ADMIN_API_KEY
     if expected and api_key != expected:
         raise HTTPException(status_code=403, detail="forbidden")
+    
     st = magiclink_state.setdefault(call_sid, {})
     st["operator_confirmed"] = True
-    # If user side is already confirmed (has location), finalize booking if possible
-    # present = await _magiclink_check_status(call_sid)
-    # if present:
-    #     await _finalize_booking_if_ready(call_sid)
-    # TEMP: finalize regardless of location presence
-    await _finalize_booking_if_ready(call_sid)
-    return {"sid": call_sid, "operator_confirmed": True}
+    
+    # Finalize booking and send confirmation to user
+    finalized = await _finalize_booking_if_ready(call_sid)
+    if finalized:
+        # Send final confirmation message to user
+        dialog = call_dialog_state.get(call_sid, {})
+        intent = dialog.get('intent', {})
+        suggested_time = dialog.get('suggested_time')
+        
+        if isinstance(suggested_time, datetime):
+            time_str = _format_slot(suggested_time)
+            confirmation_message = f"Thanks! Your appointment is confirmed for {time_str}. Thanks for choosing SafeHarbour Plumbing Services."
+            
+            # Create and send TwiML response
+            twiml = VoiceResponse()
+            await add_tts_or_say_to_twiml(twiml, call_sid, confirmation_message)
+            
+            # Update dialog state to post-booking Q&A
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'post_booking_qa'}
+            
+            # Append stream resume
+            start = Start()
+            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
+            if ws_base:
+                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            else:
+                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                else:
+                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            start.stream(url=wss_url, track="inbound_track")
+            twiml.append(start)
+            twiml.pause(length=3600)
+            
+            # Push to call
+            await push_twiml_to_call(call_sid, twiml)
+            logger.info(f"🎉 Sent final confirmation to user for {call_sid}")
+    
+    return {"sid": call_sid, "operator_confirmed": True, "finalized": finalized}
 
 @app.post("/magiclink/send/{call_sid}")
 async def magiclink_send(call_sid: str):
@@ -598,6 +664,54 @@ async def ops_action_handoff(request: Request):
     except Exception as e:
         logger.error(f"Handoff action failed for {call_sid}: {e}")
         raise HTTPException(status_code=500, detail="handoff_failed")
+
+# Send booking confirmation to operator frontend
+async def _send_booking_to_operator(call_sid: str, intent: dict, suggested_time: datetime) -> None:
+    """Send booking confirmation to operator frontend via WebSocket"""
+    try:
+        call_info = call_info_store.get(call_sid, {})
+        customer = intent.get('customer', {})
+        job = intent.get('job', {})
+        location = intent.get('location', {})
+        
+        booking_data = {
+            "type": "booking_confirmation",
+            "call_sid": call_sid,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "customer": {
+                "name": customer.get('name') or 'Customer',
+                "phone": customer.get('phone') or call_info.get('from', ''),
+                "location": location.get('raw_address') or f"{call_info.get('from_city', '')}, {call_info.get('from_state', '')}"
+            },
+            "service": {
+                "type": job.get('type') or 'plumbing_service',
+                "description": job.get('description', ''),
+                "urgency": job.get('urgency', 'flex')
+            },
+            "appointment": {
+                "suggested_time": suggested_time.isoformat(),
+                "formatted_time": _format_slot(suggested_time)
+            },
+            "status": "awaiting_operator_approval"
+        }
+        
+        # Broadcast to all connected ops WebSocket clients
+        if ops_ws_clients:
+            disconnected = set()
+            for ws in ops_ws_clients:
+                try:
+                    await ws.send_json(booking_data)
+                except Exception as e:
+                    logger.debug(f"Failed to send booking to ops client: {e}")
+                    disconnected.add(ws)
+            # Clean up disconnected clients
+            for ws in disconnected:
+                ops_ws_clients.discard(ws)
+            
+        logger.info(f"📤 Sent booking confirmation to {len(ops_ws_clients)} operator client(s)")
+        
+    except Exception as e:
+        logger.error(f"Failed to send booking to operator for {call_sid}: {e}")
 
 # Booking finalization helper
 async def _finalize_booking_if_ready(call_sid: str) -> bool:
@@ -768,9 +882,10 @@ async def voice_webhook(request: Request):
     #Build TwiML Response
     resp = VoiceResponse()
     # Greet first, then start streaming so listening begins after the message
-    greet_text = "Thank you for calling SafeHarbour Plumbing Services. We're here to help with all your plumbing needs. What can we assist you with today?"
+    greet_text = "Thank you for calling SafeHarbour Plumbing Services. If at any point you'd like to speak to a human dispatcher, just say 'transfer'. What can we assist you with today?"
     logger.info(f"🗣️ TTS SAY (greeting) for CallSid={call_sid}: {greet_text}")
-    resp.say(greet_text)
+    # Use TTS helper so greeting benefits from ElevenLabs if configured
+    await add_tts_or_say_to_twiml(resp, call_sid, greet_text)
     start = Start()
     start.stream(url=wss_url, track="inbound_track")
     resp.append(start)
@@ -1256,6 +1371,12 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
         mean_lp = sum(avg_logprobs) / len(avg_logprobs) if avg_logprobs else None
         
         normalized = text.lower().strip().strip(".,!? ")
+        # Immediate transfer if user requests it, even with low confidence
+        if is_transfer_request(normalized):
+            logger.info(f"🟢 Transfer keyword detected for {call_sid}: '{text}' (avg_logprob={mean_lp})")
+            await perform_dispatch_transfer(call_sid)
+            return
+        
         short_garbage = {"bye", "hi", "uh", "um", "hmm", "huh"}
         should_suppress = False
         if not text:
@@ -1266,9 +1387,10 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             should_suppress = True
         
         # Always accept brief confirmations even if low-confidence
-        confirm_phrases = {"done", "finished", "completed", "yes"}
+        confirm_phrases = {"done", "finished", "completed", "yes", "okay", "ok"}
         if any(p in normalized for p in confirm_phrases):
             should_suppress = False
+            logger.info(f"🎯 Accepting confirmation phrase '{text}' despite low confidence for {call_sid}")
         
         if should_suppress:
             logger.info(f"Suppressed low-confidence/short transcription for {call_sid}: '{text}' (avg_logprob={mean_lp})")
@@ -1830,9 +1952,23 @@ def parse_human_datetime(text: str, now: Optional[datetime] = None) -> Optional[
         return None
     if now is None:
         now = datetime.now()
+    
+    # Create a clean default time (same date as now, but at midnight)
+    # This prevents inheriting current minutes/seconds when only hour is specified
+    clean_default = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
     prepared = _normalize_relative_datetime_phrases(text, now)
     try:
-        dt = _dtparser.parse(prepared, fuzzy=True, default=now)
+        dt = _dtparser.parse(prepared, fuzzy=True, default=clean_default)
+        
+        # If the parsed time is in the past and only a time was specified,
+        # assume it's for tomorrow
+        if dt < now and not any(word in text.lower() for word in ['today', 'tomorrow', 'yesterday']):
+            # Check if it looks like just a time specification
+            import re
+            if re.search(r'\b\d{1,2}(:\d{2})?\s*(am|pm|a\.?m\.?|p\.?m\.?)\b', text.lower()):
+                dt = dt + timedelta(days=1)
+        
         return dt
     except Exception:
         return None
@@ -1858,6 +1994,7 @@ def gpt_infer_datetime_phrase(text: str, now_dt: Optional[datetime] = None) -> O
                 {"role": "system", "content": system},
                 {"role": "user", "content": (
                     "Given NOW and a phrase, respond with JSON: {\"iso\": \"YYYY-MM-DD HH:MM\"}. "
+                    "PRIORITY: Always preserve explicit times mentioned by user (e.g., 'six o'clock' = 6:00 PM if evening context, 'three' = 3:00 PM). "
                     "If no time given, choose 3:00 PM. If only part of day given, pick within that (morning=9:00 AM, afternoon=2:00 PM, evening=6:00 PM). "
                     "If weekday given, pick the next occurrence. If the phrase implies the past, move to the next future occurrence. "
                     "Do not include any other keys.\n\n" + user
@@ -1961,9 +2098,9 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
 
     # If followup_text is provided, treat as user's response to scheduling prompt (no <Gather>, keep streaming)
     if followup_text:
-        import dateutil.parser
         text_norm = (followup_text or '').lower().strip()
         state = call_dialog_state.get(call_sid, {}) or {}
+        logger.info(f"🔍 Processing followup '{followup_text}' for {call_sid}, current state: {state.get('step', 'none')}")
         # New: if utterance doesn't match any recognizable intent cues, ask to repeat
         if is_noise_or_unknown(text_norm):
             await add_tts_or_say_to_twiml(twiml, call_sid, "Sorry, I didn't catch that. Could you please repeat what you said?")
@@ -1976,40 +2113,97 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             return twiml
         # New: awaiting_location_confirm step
         if state.get('step') == 'awaiting_location_confirm':
-            if any(k in text_norm for k in ['done', 'finished', 'completed', 'yes']):
-                # TEMP: bypass location presence check; proceed as if location is present
-                # present = await _magiclink_check_status(call_sid)
-                # if present:
-                     # After location is received, ask to confirm the held time
-                     suggested_time = state.get('suggested_time')
-                     if isinstance(suggested_time, datetime):
-                         await add_tts_or_say_to_twiml(
-                             twiml,
-                             call_sid,
-                             f"Thanks, we received your location. Would you like me to book {_format_slot(suggested_time)}?"
-                         )
-                         state['step'] = 'awaiting_time_confirm'
-                         call_dialog_state[call_sid] = state
-                         append_stream_and_pause(twiml)
-                         return twiml
-                     # No time held; ask for date/time
-                     await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks, we received your location. Please say a date and time, like 'Friday at 3 PM'.")
-                     state['step'] = 'awaiting_time'
-                     call_dialog_state[call_sid] = state
-                     append_stream_and_pause(twiml)
-                     return twiml
-                # else:
-                #     await add_tts_or_say_to_twiml(twiml, call_sid, "I haven't received your location yet. Please open the link I texted and allow location access, then say 'done'.")
-                #     append_stream_and_pause(twiml)
-                #     return twiml
+            logger.info(f"🔍 In awaiting_location_confirm step for {call_sid}, text: '{text_norm}'")
+            # Check if this is a duplicate of last processed text to prevent double-processing
+            last_processed = state.get('last_processed_text', '')
+            if text_norm.strip() == last_processed.strip() and text_norm.strip():
+                logger.info(f"🚫 Ignoring duplicate input: '{text_norm}' for {call_sid}")
+                await add_tts_or_say_to_twiml(twiml, call_sid, "Sorry, I didn't catch that. Could you please repeat what you said?")
+                append_stream_and_pause(twiml)
+                return twiml
+            # Flexible confirmation and noise filtering
+            confirmation_keywords = ['done', 'finished', 'completed', 'yes', 'okay', 'ok', 'ready', 'confirm', 'confirmed']
+            is_confirmation = any(k in text_norm for k in confirmation_keywords)
+            # Very short responses are often 'done' misheard
+            if not is_confirmation and len(text_norm) < 10:
+                is_confirmation = True
+            # Ignore unrelated URL/review chatter and background noise
+            if not is_confirmation:
+                noise_patterns = [
+                    r'(https?://|www\.|\.[a-z]{2,6}\b)', 
+                    r'thank you for watching',
+                    r'subscribe.*channel',
+                    r'like.*comment',
+                    r'video.*description',
+                    r'pissedconsumer',
+                    r'review'
+                ]
+                if any(re.search(pattern, text_norm) for pattern in noise_patterns):
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Please just say 'done' when you're ready to confirm your appointment.")
+                    append_stream_and_pause(twiml)
+                    return twiml
+            if is_confirmation:
+                logger.info(f"✅ User confirmed location with: '{text_norm}' for {call_sid}")
+                # Mark this text as processed to prevent duplicates
+                state['last_processed_text'] = text_norm
+                call_dialog_state[call_sid] = state
+                # Mark user as confirmed in mocked state
+                ml_state = magiclink_state.get(call_sid, {})
+                if ml_state.get("mocked"):
+                    ml_state["user_confirmed"] = True
+                    magiclink_state[call_sid] = ml_state
+                    logger.info(f"📍 MOCK: User confirmed location for {call_sid}")
+                
+                # Check location status (will now return True for mocked confirmed users)
+                present = await _magiclink_check_status(call_sid)
+                logger.info(f"🗺️ Location status check result for {call_sid}: {present}")
+                if present:
+                    # After location is received, send booking to operator and tell user to hold
+                    suggested_time = state.get('suggested_time')
+                    logger.info(f"🕒 DEBUG: suggested_time type={type(suggested_time)}, value={suggested_time}")
+                    if isinstance(suggested_time, datetime):
+                        # Send booking confirmation to operator frontend
+                        await _send_booking_to_operator(call_sid, intent, suggested_time)
+                        logger.info(f"✅ Confirmation sent to operator for {call_sid}")
+                        
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"Perfect! Please hold while our operator confirms your appointment for {_format_slot(suggested_time)}."
+                        )
+                        state['step'] = 'awaiting_operator_confirm'
+                        call_dialog_state[call_sid] = state
+                        logger.info(f"🔄 DEBUG: Advanced state to awaiting_operator_confirm for {call_sid}")
+                        append_stream_and_pause(twiml)
+                        return twiml
+                    else:
+                        logger.error(f"🚨 DEBUG: suggested_time is not datetime: {suggested_time}, skipping operator confirmation")
+                    # No time held; ask for date/time
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks, we received your location. Please say a date and time, like 'Friday at 3 PM'.")
+                    state['step'] = 'awaiting_time'
+                    call_dialog_state[call_sid] = state
+                    append_stream_and_pause(twiml)
+                    return twiml
+                else:
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I haven't received your location yet. Please open the link I texted and allow location access, then say 'done'.")
+                    append_stream_and_pause(twiml)
+                    return twiml
         if state.get('step') == 'awaiting_operator_confirm':
             finalized = await _finalize_booking_if_ready(call_sid)
             if finalized:
-                await add_tts_or_say_to_twiml(twiml, call_sid, "Your appointment is now confirmed. Thank you!")
+                suggested_time = state.get('suggested_time')
+                job_type = intent.get('job', {}).get('type', 'plumbing service')
+                time_str = _format_slot(suggested_time) if isinstance(suggested_time, datetime) else "your requested time"
+                await add_tts_or_say_to_twiml(
+                    twiml, 
+                    call_sid, 
+                    f"Thanks! Your appointment is confirmed for {time_str}. Thanks for choosing SafeHarbour Plumbing Services."
+                )
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'post_booking_qa'}
                 append_stream_and_pause(twiml)
                 return twiml
             else:
-                await add_tts_or_say_to_twiml(twiml, call_sid, "We are awaiting final dispatcher confirmation. One moment.")
+                await add_tts_or_say_to_twiml(twiml, call_sid, "Please continue to hold while our operator confirms your booking.")
                 append_stream_and_pause(twiml)
                 return twiml
         # Confirmation step: user can confirm or change the suggested slot
@@ -2063,17 +2257,16 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     end_time = newly_parsed + timedelta(hours=2)
                     events = calendar_adapter.get_events(start_date=newly_parsed, end_date=end_time)
                 if not events:
-                    # Send location link immediately and hold this time
-                    try:
-                        ok = await _send_magiclink_sms(call_sid)
-                    except Exception:
-                        ok = False
-                    if ok:
-                        await add_tts_or_say_to_twiml(twiml, call_sid, f"I can hold {_format_slot(newly_parsed)}. I sent a secure link to confirm your location. Please open it and say 'done'.")
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': newly_parsed}
-                    else:
-                        await add_tts_or_say_to_twiml(twiml, call_sid, f"I can hold {_format_slot(newly_parsed)}. Should I book it?")
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': newly_parsed}
+                    # Skip SMS and just set up mock state directly
+                    magiclink_state[call_sid] = {
+                        "token": f"mock_token_{call_sid}",
+                        "sent": True,
+                        "user_confirmed": False,
+                        "operator_confirmed": False,
+                        "mocked": True
+                    }
+                    await add_tts_or_say_to_twiml(twiml, call_sid, f"I can hold {_format_slot(newly_parsed)}. Just say 'done' when you're ready to confirm.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': newly_parsed}
                 else:
                     # Suggest next available 2h window and send location link
                     next_available = newly_parsed + timedelta(hours=2)
@@ -2085,12 +2278,13 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                             if not slot_events:
                                 next_available = slot_start
                                 break
-                    try:
-                        ok = await _send_magiclink_sms(call_sid)
-                    except Exception:
-                        ok = False
+                    # try:
+                    #     ok = await _send_magiclink_sms(call_sid)
+                    # except Exception:
+                    #     ok = False
+                    ok = True  # Skip SMS for now, just wait for "done"
                     if ok:
-                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. I sent a link to confirm your location; please open it and say 'done'.")
+                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Just say 'done' when you're ready to confirm.")
                         call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': next_available}
                     else:
                         await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?")
@@ -2115,15 +2309,16 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                                 suggested = slot_start
                                 break
                     # Send location link immediately and hold this time
-                    try:
-                        ok = await _send_magiclink_sms(call_sid)
-                    except Exception:
-                        ok = False
+                    # try:
+                    #     ok = await _send_magiclink_sms(call_sid)
+                    # except Exception:
+                    #     ok = False
+                    ok = True  # Skip SMS for now, just wait for "done"
                     if ok:
                         await add_tts_or_say_to_twiml(
                             twiml,
                             call_sid,
-                            f"Understood. The closest available slot is {_format_slot(suggested)}. I sent a secure link to confirm your location. Please open it and say 'done'."
+                            f"Understood. The closest available slot is {_format_slot(suggested)}. Just say 'done' when you're ready to confirm."
                         )
                         call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': suggested}
                     else:
@@ -2161,15 +2356,16 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                         events = calendar_adapter.get_events(start_date=start_time, end_date=end_time)
                     if not events:
                         # Hold time and send location link immediately
-                        try:
-                            ok = await _send_magiclink_sms(call_sid)
-                        except Exception:
-                            ok = False
+                        # try:
+                        #     ok = await _send_magiclink_sms(call_sid)
+                        # except Exception:
+                        #     ok = False
+                        ok = True  # Skip SMS for now, just wait for "done"
                         if ok:
                             await add_tts_or_say_to_twiml(
                                 twiml,
                                 call_sid,
-                                f"Thanks. I can hold {_format_slot(start_time)} for your {_speakable(job_type)}. I sent a secure link to confirm your location. Please open it and say 'done'."
+                                f"Thanks. I can hold {_format_slot(start_time)} for your {_speakable(job_type)}. Just say 'done' when you're ready to confirm."
                             )
                             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': start_time}
                         else:
@@ -2190,15 +2386,16 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                                 if not slot_events:
                                     next_available = slot_start
                                     break
-                        try:
-                            ok = await _send_magiclink_sms(call_sid)
-                        except Exception:
-                            ok = False
+                        # try:
+                        #     ok = await _send_magiclink_sms(call_sid)
+                        # except Exception:
+                        #     ok = False
+                        ok = True  # Skip SMS for now, just wait for "done"
                         if ok:
                             await add_tts_or_say_to_twiml(
                                 twiml,
                                 call_sid,
-                                f"That time looks busy. The next available is {_format_slot(next_available)}. I sent a secure link to confirm your location. Please open it and say 'done'."
+                                f"That time looks busy. The next available is {_format_slot(next_available)}. Just say 'done' when you're ready to confirm."
                             )
                             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': next_available}
                         else:
@@ -2239,12 +2436,13 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                         suggested = slot_start
                         break
             # Send magiclink immediately and hold this time
-            try:
-                ok = await _send_magiclink_sms(call_sid)
-            except Exception:
-                ok = False
+            # try:
+            #     ok = await _send_magiclink_sms(call_sid)
+            # except Exception:
+            #     ok = False
+            ok = True  # Skip SMS for now, just wait for "done"
             if ok:
-                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. I sent a secure link to confirm your location. Please open it and say 'done'.")
+                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Just say 'done' when you're ready to confirm.")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': suggested}
             else:
                 await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Should I book that?")
@@ -2395,8 +2593,40 @@ def is_noise_or_unknown(text: str) -> bool:
     tokens = set(norm.split())
     if tokens & cue_words:
         return False
-    # If contains any digit, likely not pure noise
-    if re.search(r"\d", norm):
+    # Accept explicit time-like expressions (e.g., 3 pm, 10:30 am)
+    if re.search(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", norm):
         return False
+    # Treat URLs/domains and review chatter as noise
+    if re.search(r"(https?://|www\.|\.[a-z]{2,6}\b)", norm) or 'pissedconsumer' in norm or 'review' in norm:
+        return True
     # Single very short/uncommon word → treat as noise
     return len(tokens) <= 2
+
+# Transfer intent detection
+def is_transfer_request(text: str) -> bool:
+    norm = " ".join((text or "").lower().strip().split())
+    # Keywords that indicate a transfer request
+    transfer_keywords = [
+        "transfer", "transfer me", "dispatcher", "operator", "human", "representative", "agent"
+    ]
+    return any(k in norm for k in transfer_keywords)
+
+async def perform_dispatch_transfer(call_sid: str) -> None:
+    try:
+        number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+        twiml = VoiceResponse()
+        # Minimal prompt then transfer
+        try:
+            twiml.say("Connecting you to our dispatcher now.")
+        except Exception:
+            pass
+        twiml.dial(number)
+        # Mark state to avoid further processing
+        st = call_info_store.setdefault(call_sid, {})
+        st["handoff_requested"] = True
+        st["handoff_reason"] = "user_requested_transfer"
+        call_info_store[call_sid] = st
+        await push_twiml_to_call(call_sid, twiml)
+        logger.info(f"📞 Initiated transfer for {call_sid} to dispatcher {number}")
+    except Exception as e:
+        logger.error(f"Failed to perform dispatch transfer for {call_sid}: {e}")

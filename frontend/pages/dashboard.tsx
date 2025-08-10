@@ -146,7 +146,7 @@ export default function LiveOpsDashboard() {
   const [selectedSlot, setSelectedSlot] = useState<Date | null>(null);
 
   const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const [transcripts, setTranscripts] = useState<Array<{ callSid: string; text: string; ts: string }>>([]);
+  const [transcripts, setTranscripts] = useState<Array<{ callSid: string; text: string; intent?: string; ts: string }>>([]);
 
   const wsUrl = useMemo(() => {
     if (typeof window === 'undefined') return null;
@@ -169,6 +169,31 @@ export default function LiveOpsDashboard() {
     notes?: string;
   } | null>(null);
   const [highlightActions, setHighlightActions] = useState(false);
+
+  // Helper functions for intent display
+  const getIntentColor = (intent: string): string => {
+    const colors: Record<string, string> = {
+      EMERGENCY_FIX: 'bg-red-500/20 text-red-300 border border-red-500/30',
+      CLOG_BLOCKAGE: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
+      LEAKING_FIXTURE: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',
+      INSTALL_REQUEST: 'bg-green-500/20 text-green-300 border border-green-500/30',
+      WATER_HEATER_ISSUE: 'bg-orange-500/20 text-orange-300 border border-orange-500/30',
+      QUOTE_REQUEST: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
+      REMODEL_INQUIRY: 'bg-pink-500/20 text-pink-300 border border-pink-500/30',
+      RECURRING_PROBLEM: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',
+      DRAIN_MAINTENANCE: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30',
+      GENERAL_INQUIRY: 'bg-gray-500/20 text-gray-300 border border-gray-500/30',
+    };
+    return colors[intent] || colors.GENERAL_INQUIRY;
+  };
+
+  const formatIntentTag = (intent: string): string => {
+    return intent
+      .toLowerCase()
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
 
   useWebSocket<{ type: string; data?: any }>(wsUrl, {
     onOpen: () => setWsProblem(null),
@@ -340,7 +365,12 @@ export default function LiveOpsDashboard() {
                       liveTranscripts.map((t, idx) => (
                         <div key={idx} className="flex items-start gap-2">
                           <span className="text-xs text-white/50">[{new Date(t.ts).toLocaleTimeString()}]</span>
-                          <span className="text-white/90">{t.text}</span>
+                          {t.intent && (
+                            <span className={`text-xs px-2 py-1 rounded-full font-medium ${getIntentColor(t.intent)}`}>
+                              {formatIntentTag(t.intent)}
+                            </span>
+                          )}
+                          <span className="text-white/90 flex-1">{t.text}</span>
                         </div>
                       ))
                     )}

@@ -68,7 +68,7 @@ def webhook():
         response = VoiceResponse()
         
         # Greeting message
-        response.say("Thank you for calling SafeHarbour Plumbing Services. We're here to help with all your plumbing needs. What can we assist you with today?", voice='alice')
+        response.say("Thank you for calling SafeHarbour Plumbing Services. If at any point you'd like to speak to a human dispatcher, just say 'transfer'. What can we assist you with today?", voice='alice')
         
         # Add callSid to the transcription callback URL
         transcription_callback_url = f"/transcription-callback?callSid={call_sid}" if call_sid else "/transcription-callback"
