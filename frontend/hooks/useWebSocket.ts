@@ -10,9 +10,18 @@ interface Options<T> {
 export function useWebSocket<T = any>(url: string | null, opts: Options<T> = {}) {
   const { onMessage, onOpen, onError, enabled = true } = opts;
   const wsRef = useRef<WebSocket | null>(null);
+  // Keep latest handlers in refs so the socket doesn't reconnect on each render
+  const handlersRef = useRef<{ onMessage?: Options<T>['onMessage']; onOpen?: Options<T>['onOpen']; onError?: Options<T>['onError'] }>({ onMessage, onOpen, onError });
   const [connected, setConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Update handler refs when callbacks change without triggering reconnection
+  useEffect(() => {
+    handlersRef.current.onMessage = onMessage;
+    handlersRef.current.onOpen = onOpen;
+    handlersRef.current.onError = onError;
+  }, [onMessage, onOpen, onError]);
 
   useEffect(() => {
     if (!url || !enabled) return;
@@ -29,20 +38,20 @@ export function useWebSocket<T = any>(url: string | null, opts: Options<T> = {})
           setConnected(true);
           setError(null);
           retry = 0;
-          onOpen?.();
+          handlersRef.current.onOpen?.();
         };
         ws.onmessage = (ev) => {
           try {
             const data = JSON.parse(ev.data);
             setLastMessage(data);
-            onMessage?.(data);
+            handlersRef.current.onMessage?.(data);
           } catch (_e) {
             // ignore
           }
         };
         ws.onerror = (ev) => {
           setError('WebSocket error');
-          onError?.(ev);
+          handlersRef.current.onError?.(ev);
         };
         ws.onclose = () => {
           setConnected(false);
@@ -62,7 +71,18 @@ export function useWebSocket<T = any>(url: string | null, opts: Options<T> = {})
       stopped = true;
       wsRef.current?.close();
     };
-  }, [url, enabled, onMessage, onOpen, onError]);
+  }, [url, enabled]);
 
-  return { connected, lastMessage, error };
+  const sendJson = (data: any) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(JSON.stringify(data));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  return { connected, lastMessage, error, sendJson };
 } 

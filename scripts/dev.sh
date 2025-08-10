@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Load .env from project root if present (export all variables)
+if [ -f ".env" ]; then
+  echo "[env] Loading .env from project root"
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+
 # Defaults (override by exporting before running)
 export APP_BASE_URL=${APP_BASE_URL:-http://localhost:8000}
 export FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
@@ -23,6 +32,26 @@ export NEXT_PUBLIC_PHONE_API_URL=${NEXT_PUBLIC_PHONE_API_URL:-http://localhost:5
 
 # Pretty log helper
 log() { echo -e "\033[1;36m[$(date +%H:%M:%S)]\033[0m $*"; }
+
+# Free up commonly used dev ports to avoid EADDRINUSE
+free_port() {
+  local port="$1"
+  # Find PIDs listening on the port; ignore errors if none
+  local pids
+  pids=$(lsof -ti tcp:"${port}" 2>/dev/null || true)
+  if [ -n "${pids}" ]; then
+    log "Freeing port :${port} (PIDs: ${pids})"
+    # Try graceful then forceful kill
+    kill -TERM ${pids} 2>/dev/null || true
+    sleep 0.5
+    # If still alive, force kill
+    kill -KILL ${pids} 2>/dev/null || true
+  fi
+}
+
+free_port 8000
+free_port 5001
+free_port 3000
 
 # Start services
 log "Starting Magiclink API on :8000"

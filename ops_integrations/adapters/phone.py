@@ -64,12 +64,15 @@ except Exception:
     _audioop = None
 
 #---------------CONFIGURATION---------------
+# Ensure .env is read from repo root (if present)
+load_dotenv()
+
 class Settings(BaseSettings):
     # Read .env by default (repo root). You can also export envs directly.
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-    TWILIO_ACCOUNT_SID: str 
+    TWILIO_ACCOUNT_SID: str
     TWILIO_AUTH_TOKEN: str
-    EXTERNAL_WEBHOOK_URL: str  # External URL for WebSocket (e.g., ngrok URL)
+    EXTERNAL_WEBHOOK_URL: str = os.getenv("EXTERNAL_WEBHOOK_URL", "http://localhost:5001")  # External URL for WebSocket (e.g., ngrok URL)
     SERVER_HOST: str = "0.0.0.0"
     SERVER_PORT: int = 5001
     SSL_CERT_FILE: Optional[str] = None
@@ -80,15 +83,13 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: Optional[str] = None
     ELEVENLABS_VOICE_ID: Optional[str] = None  # Set a default in env if desired
     ELEVENLABS_MODEL_ID: Optional[str] = None  # e.g. "eleven_multilingual_v2"
-    FORCE_SAY_ONLY: bool = True  # Diagnostics: avoid TTS and use <Say>
+    FORCE_SAY_ONLY: bool = False  # Diagnostics: avoid TTS and use <Say>
     # Magiclink integration
     MAGICLINK_API_BASE: str = os.getenv("MAGICLINK_API_BASE", "http://localhost:8000")
     MAGICLINK_APP_URL: str = os.getenv("MAGICLINK_APP_URL", "http://localhost:3000/location")
     MAGICLINK_ADMIN_API_KEY: Optional[str] = os.getenv("MAGICLINK_ADMIN_API_KEY")
     # Accept either TWILIO_SMS_FROM or TWILIO_FROM_NUMBER for convenience
     TWILIO_SMS_FROM: Optional[str] = os.getenv("TWILIO_SMS_FROM") or os.getenv("TWILIO_FROM_NUMBER")
-    class Config:
-       load_dotenv()
 
 settings = Settings()
 
@@ -141,6 +142,8 @@ last_twiml_store: dict[str, str] = {}
 # Track last TwiML push timestamp to throttle rapid updates
 last_twiml_push_ts: dict[str, float] = {}
 TWIML_PUSH_MIN_INTERVAL_SEC = 1.5
+# Incrementing version per call to bust TwiML dedupe/caching for <Play>
+tts_version_counter: dict[str, int] = {}
 
 # Live Ops metrics aggregation and websocket clients
 from collections import deque
@@ -304,6 +307,59 @@ async def _broadcast_ops_metrics():
             pass
 
 
+async def _broadcast_transcript(call_sid: str, text: str):
+    if not ops_ws_clients:
+        return
+    payload = {
+        "type": "transcript",
+        "data": {
+            "callSid": call_sid,
+            "text": text,
+            "ts": datetime.utcnow().isoformat() + "Z",
+        },
+    }
+    disconnected: list[WebSocket] = []
+    for ws in list(ops_ws_clients):
+        try:
+            await ws.send_json(payload)
+        except WebSocketDisconnect:
+            disconnected.append(ws)
+        except Exception:
+            disconnected.append(ws)
+    for ws in disconnected:
+        try:
+            ops_ws_clients.discard(ws)
+        except Exception:
+            pass
+
+
+# New: broadcast job description to ops dashboard when booking is ready
+async def _broadcast_job_description(call_sid: str, job_payload: dict):
+    if not ops_ws_clients:
+        return
+    payload = {
+        "type": "job_description",
+        "data": {
+            "callSid": call_sid,
+            "job": job_payload,
+            "ts": datetime.utcnow().isoformat() + "Z",
+        },
+    }
+    disconnected: list[WebSocket] = []
+    for ws in list(ops_ws_clients):
+        try:
+            await ws.send_json(payload)
+        except WebSocketDisconnect:
+            disconnected.append(ws)
+        except Exception:
+            disconnected.append(ws)
+    for ws in disconnected:
+        try:
+            ops_ws_clients.discard(ws)
+        except Exception:
+            pass
+
+
 @app.get("/metrics")
 async def get_metrics_snapshot():
     return JSONResponse(content=_compute_ops_snapshot())
@@ -365,7 +421,28 @@ async def _send_magiclink_sms(call_sid: str) -> bool:
         if twilio_client is None:
             logger.warning("SMS send skipped: Twilio client unavailable")
             return False
-        twilio_client.messages.create(to=to_number, from_=from_number, body=f"SafeHarbour: Share your location to dispatch your technician: {link}")
+        if not settings.TWILIO_SMS_FROM:
+            logger.warning("Using voice 'To' number as SMS sender; set TWILIO_SMS_FROM to an SMS-capable number for reliability")
+
+        # Derive a public callback URL for Twilio delivery status from ws_base when available
+        status_callback_url = None
+        try:
+            ws_base = call_info.get("ws_base")
+            if isinstance(ws_base, str) and ws_base:
+                if ws_base.startswith("wss://"):
+                    status_callback_url = "https://" + ws_base[len("wss://"):]
+                elif ws_base.startswith("ws://"):
+                    status_callback_url = "http://" + ws_base[len("ws://"):]
+                if status_callback_url:
+                    status_callback_url = status_callback_url.rstrip("/") + "/twilio/sms/status"
+        except Exception:
+            status_callback_url = None
+
+        kwargs = {"to": to_number, "from_": from_number, "body": f"SafeHarbour: Share your location to dispatch your technician: {link}"}
+        if status_callback_url:
+            kwargs["status_callback"] = status_callback_url
+        msg = twilio_client.messages.create(**kwargs)
+        logger.info(f"Magiclink SMS sent to {to_number} from {from_number}; sid={getattr(msg, 'sid', None)}")
         magiclink_state[call_sid] = {
             "token": token,
             "jti": token_resp.get("jti"),
@@ -396,9 +473,11 @@ async def magiclink_operator_confirm(call_sid: str, request: Request):
     st = magiclink_state.setdefault(call_sid, {})
     st["operator_confirmed"] = True
     # If user side is already confirmed (has location), finalize booking if possible
-    present = await _magiclink_check_status(call_sid)
-    if present:
-        await _finalize_booking_if_ready(call_sid)
+    # present = await _magiclink_check_status(call_sid)
+    # if present:
+    #     await _finalize_booking_if_ready(call_sid)
+    # TEMP: finalize regardless of location presence
+    await _finalize_booking_if_ready(call_sid)
     return {"sid": call_sid, "operator_confirmed": True}
 
 @app.post("/magiclink/send/{call_sid}")
@@ -408,13 +487,128 @@ async def magiclink_send(call_sid: str):
         raise HTTPException(status_code=500, detail="failed to send magiclink")
     return {"status": "sent"}
 
+@app.post("/twilio/sms/status")
+async def twilio_sms_status(request: Request):
+    form = await request.form()
+    logger.info(
+        f"SMS status callback: sid={form.get('MessageSid')} status={form.get('MessageStatus')} to={form.get('To')} error={form.get('ErrorCode')}"
+    )
+    return Response(status_code=204)
+
+@app.post("/ops/action/approve")
+async def ops_action_approve(request: Request):
+    # Optional API key enforcement
+    api_key = request.headers.get("x-api-key")
+    expected = os.getenv("OPERATOR_ACTION_API_KEY") or settings.MAGICLINK_ADMIN_API_KEY
+    if expected and api_key != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    payload = await request.json()
+    call_sid = payload.get("call_sid")
+    if not call_sid:
+        raise HTTPException(status_code=400, detail="missing_call_sid")
+
+    appointment_iso = payload.get("appointment_iso")
+    note = payload.get("note", "")
+    try:
+        if appointment_iso:
+            try:
+                # Support both Z and offset formats
+                appt = datetime.fromisoformat(appointment_iso.replace("Z", "+00:00"))
+            except Exception:
+                raise HTTPException(status_code=400, detail="invalid_appointment_iso")
+        else:
+            appt = datetime.utcnow() + timedelta(hours=1)
+
+        intent = call_dialog_state.get(call_sid, {}).get("intent", {})
+        customer = intent.get("customer", {})
+        job = intent.get("job", {})
+        location = intent.get("location", {})
+
+        phone = customer.get("phone") or call_info_store.get(call_sid, {}).get("from") or ""
+        name = customer.get("name") or "Customer"
+        service = job.get("type") or "Plumbing Service"
+        address = location.get("raw_address") or ""
+
+        # Store operator note
+        st = call_info_store.setdefault(call_sid, {})
+        if note:
+            st["operator_note"] = note
+            call_info_store[call_sid] = st
+
+        result = book_scheduled_job(
+            phone=phone,
+            name=name,
+            service=service,
+            appointment_time=appt,
+            address=address,
+            notes=note,
+        )
+        return JSONResponse(content={"ok": True, "result": result})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Approve action failed for {call_sid}: {e}")
+        raise HTTPException(status_code=500, detail="approve_failed")
+
+
+@app.post("/ops/action/override")
+async def ops_action_override(request: Request):
+    api_key = request.headers.get("x-api-key")
+    expected = os.getenv("OPERATOR_ACTION_API_KEY") or settings.MAGICLINK_ADMIN_API_KEY
+    if expected and api_key != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    payload = await request.json()
+    call_sid = payload.get("call_sid")
+    if not call_sid:
+        raise HTTPException(status_code=400, detail="missing_call_sid")
+    reason = payload.get("reason", "")
+
+    try:
+        st = call_info_store.setdefault(call_sid, {})
+        st["operator_override_reason"] = reason
+        call_info_store[call_sid] = st
+        return JSONResponse(content={"ok": True})
+    except Exception as e:
+        logger.error(f"Override action failed for {call_sid}: {e}")
+        raise HTTPException(status_code=500, detail="override_failed")
+
+
+@app.post("/ops/action/handoff")
+async def ops_action_handoff(request: Request):
+    api_key = request.headers.get("x-api-key")
+    expected = os.getenv("OPERATOR_ACTION_API_KEY") or settings.MAGICLINK_ADMIN_API_KEY
+    if expected and api_key != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    payload = await request.json()
+    call_sid = payload.get("call_sid")
+    if not call_sid:
+        raise HTTPException(status_code=400, detail="missing_call_sid")
+    reason = payload.get("reason", "")
+
+    try:
+        st = call_info_store.setdefault(call_sid, {})
+        st["handoff_requested"] = True
+        if reason:
+            st["handoff_reason"] = reason
+        call_info_store[call_sid] = st
+        return JSONResponse(content={"ok": True})
+    except Exception as e:
+        logger.error(f"Handoff action failed for {call_sid}: {e}")
+        raise HTTPException(status_code=500, detail="handoff_failed")
+
 # Booking finalization helper
 async def _finalize_booking_if_ready(call_sid: str) -> bool:
     try:
         st = magiclink_state.get(call_sid, {})
         operator_ok = bool(st.get("operator_confirmed"))
-        user_ok = await _magiclink_check_status(call_sid)
-        if not (operator_ok and user_ok):
+        # user_ok = await _magiclink_check_status(call_sid)
+        # if not (operator_ok and user_ok):
+        #     return False
+        # TEMP: proceed if operator confirmed, regardless of user/location status
+        if not operator_ok:
             return False
         dialog = call_dialog_state.get(call_sid, {})
         intent = dialog.get('intent', {})
@@ -427,6 +621,25 @@ async def _finalize_booking_if_ready(call_sid: str) -> bool:
         notes = intent.get('job', {}).get('description', '')
         if suggested_time is None:
             return False
+
+        # Prepare job description for frontend drawer
+        appt_iso = suggested_time.isoformat()
+        if not appt_iso.endswith('Z') and '+' not in appt_iso:
+            appt_iso = appt_iso + 'Z'
+        job_payload = {
+            "customer_phone": phone,
+            "customer_name": name,
+            "service_type": job_type,
+            "appointment_time": appt_iso,
+            "address": address or '',
+            "notes": notes or '',
+        }
+        # Notify ops dashboards
+        try:
+            await _broadcast_job_description(call_sid, job_payload)
+        except Exception:
+            pass
+
         book_scheduled_job(
             phone=phone,
             name=name,
@@ -555,7 +768,9 @@ async def voice_webhook(request: Request):
     #Build TwiML Response
     resp = VoiceResponse()
     # Greet first, then start streaming so listening begins after the message
-    resp.say("Thank you for calling SafeHarbour Plumbing Services. We're here to help with all your plumbing needs. What can we assist you with today?")
+    greet_text = "Thank you for calling SafeHarbour Plumbing Services. We're here to help with all your plumbing needs. What can we assist you with today?"
+    logger.info(f"🗣️ TTS SAY (greeting) for CallSid={call_sid}: {greet_text}")
+    resp.say(greet_text)
     start = Start()
     start.stream(url=wss_url, track="inbound_track")
     resp.append(start)
@@ -615,135 +830,116 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 @app.websocket(settings.STREAM_ENDPOINT)
-async def media_stream(ws: WebSocket):
-    """Enhanced WebSocket endpoint for Twilio media streaming with better error handling"""
+async def media_stream_ws(ws: WebSocket):
+    await ws.accept()
+    call_sid: Optional[str] = None
+    temporary_stream_key: Optional[str] = None
     try:
-        # Accept connection first, then validate
-        await ws.accept()
-        
-        # Extract CallSid from query parameters if available (Twilio may not forward query params)
-        callSid = ws.query_params.get("callSid")
-        logger.info(f"WebSocket connection accepted for potential CallSid={callSid}")
+        # Try to extract CallSid from query params (Twilio may pass it)
+        call_sid = ws.query_params.get("callSid")
+        logger.info(f"WebSocket connection accepted for potential CallSid={call_sid}")
         logger.info(f"All query params: {dict(ws.query_params)}")
         logger.info(f"WebSocket URL: {ws.url}")
-        
-        # If CallSid not present in query, wait for Twilio 'start' event which includes it
-        if not callSid:
+
+        # If not present, wait for 'start' event which contains callSid
+        if not call_sid:
             logger.info("CallSid not in query params, waiting for 'start' event from Twilio...")
-            try:
-                handshake_deadline = time.time() + 10.0  # seconds
-                temporary_stream_key = None
-                while time.time() < handshake_deadline and not callSid:
-                    msg = await ws.receive_text()
-                    logger.debug(f"Init/handshake message received: {msg[:200]}...")
-                    try:
-                        data = json.loads(msg)
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse handshake message as JSON: {e}")
-                        continue
+            handshake_deadline = time.time() + 10.0
+            while time.time() < handshake_deadline and not call_sid:
+                msg = await ws.receive_text()
+                logger.debug(f"Init/handshake message received: {msg[:200]}...")
+                try:
+                    data = json.loads(msg)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse handshake message as JSON: {e}")
+                    continue
 
-                    event_type = data.get("event")
-                    if event_type == "connected":
-                        # Initial Twilio message, continue waiting for 'start'
-                        logger.debug("Received 'connected' event; awaiting 'start' for CallSid...")
-                        continue
-
-                    if event_type == "start":
-                        start_obj = data.get("start") or {}
-                        # Twilio uses lowercase 'callSid' in WebSocket events
-                        callSid = start_obj.get("callSid") or start_obj.get("CallSid")
-                        stream_sid = start_obj.get("streamSid") or data.get("streamSid")
-                        # Capture media format for decoding
-                        media_format = start_obj.get("mediaFormat", {})
-                        enc = str(media_format.get("encoding", "mulaw")).lower()
-                        sr = int(media_format.get("sampleRate", SAMPLE_RATE_DEFAULT))
-                        if "mulaw" in enc or "pcmu" in enc:
-                            audio_config_store[callSid] = {"encoding": "mulaw", "sample_rate": sr}
-                        elif "l16" in enc or "pcm" in enc:
-                            audio_config_store[callSid] = {"encoding": "pcm16", "sample_rate": sr}
-                        else:
-                            audio_config_store[callSid] = {"encoding": "mulaw", "sample_rate": SAMPLE_RATE_DEFAULT}
-                        logger.info(f"Media format for {callSid}: {audio_config_store[callSid]}")
-                        if not callSid and stream_sid:
-                            # As a temporary fallback, use streamSid until CallSid is available
-                            temporary_stream_key = f"stream:{stream_sid}"
-                            manager.active_connections[temporary_stream_key] = ws
-                            logger.warning(f"Using streamSid as temporary key before CallSid is available: {temporary_stream_key}")
-                        if callSid:
-                            # Store connection under the real CallSid
-                            manager.active_connections[callSid] = ws
-                            logger.info(f"✅ CallSid found in start event: {callSid}")
-                            # Process the already-received start packet
-                            asyncio.create_task(handle_media_packet(callSid, msg))
-                            break
-                        else:
-                            logger.error("Start event received but no callSid present.")
-                            continue
-
-                    # In the unlikely case 'media' arrives before 'start', try to recover
-                    possible_call_sid = data.get("callSid") or data.get("CallSid")
-                    if possible_call_sid:
-                        callSid = possible_call_sid
-                        manager.active_connections[callSid] = ws
-                        logger.info(f"✅ CallSid found outside start event: {callSid}")
-                        asyncio.create_task(handle_media_packet(callSid, msg))
-                        break
-
-                    stream_sid = data.get("streamSid") or (data.get("start") or {}).get("streamSid")
-                    if stream_sid and not temporary_stream_key:
+                evt = data.get("event")
+                if evt == "connected":
+                    continue
+                if evt == "start":
+                    start_obj = data.get("start") or {}
+                    call_sid = start_obj.get("callSid") or start_obj.get("CallSid")
+                    stream_sid = start_obj.get("streamSid") or data.get("streamSid")
+                    media_format = start_obj.get("mediaFormat", {})
+                    enc = str(media_format.get("encoding", "mulaw")).lower()
+                    sr = int(media_format.get("sampleRate", SAMPLE_RATE_DEFAULT))
+                    if "mulaw" in enc or "pcmu" in enc:
+                        audio_config_store[call_sid] = {"encoding": "mulaw", "sample_rate": sr}
+                    elif "l16" in enc or "pcm" in enc:
+                        audio_config_store[call_sid] = {"encoding": "pcm16", "sample_rate": sr}
+                    else:
+                        audio_config_store[call_sid] = {"encoding": "mulaw", "sample_rate": SAMPLE_RATE_DEFAULT}
+                    logger.info(f"Media format for {call_sid}: {audio_config_store.get(call_sid)}")
+                    if not call_sid and stream_sid:
                         temporary_stream_key = f"stream:{stream_sid}"
                         manager.active_connections[temporary_stream_key] = ws
-                        logger.warning(f"Temporarily storing connection with key {temporary_stream_key} until CallSid arrives...")
+                        logger.warning(f"Using streamSid as temporary key before CallSid is available: {temporary_stream_key}")
+                    if call_sid:
+                        manager.active_connections[call_sid] = ws
+                        logger.info(f"✅ CallSid found in start event: {call_sid}")
+                        # Process this start packet too
+                        asyncio.create_task(handle_media_packet(call_sid, msg))
+                        break
+                    else:
+                        logger.error("Start event received but no callSid present.")
                         continue
+                # Edge case: media before start
+                possible_call_sid = data.get("callSid") or data.get("CallSid")
+                if possible_call_sid:
+                    call_sid = possible_call_sid
+                    manager.active_connections[call_sid] = ws
+                    logger.info(f"✅ CallSid found outside start event: {call_sid}")
+                    asyncio.create_task(handle_media_packet(call_sid, msg))
+                    break
+                stream_sid = data.get("streamSid") or (data.get("start") or {}).get("streamSid")
+                if stream_sid and not temporary_stream_key:
+                    temporary_stream_key = f"stream:{stream_sid}"
+                    manager.active_connections[temporary_stream_key] = ws
+                    logger.warning(f"Temporarily storing connection with key {temporary_stream_key} until CallSid arrives...")
+                    continue
+            if not call_sid:
+                logger.warning("Missing CallSid after waiting for start event")
+                await ws.close(code=1008, reason="Missing CallSid parameter")
+                return
+        # Ensure registration when callSid came via query
+        if call_sid not in manager.active_connections:
+            manager.active_connections[call_sid] = ws
+            logger.info(f"WebSocket connection established for CallSid={call_sid}")
 
-                if not callSid:
-                    logger.warning("Missing CallSid after waiting for start event")
-                    await ws.close(code=1008, reason="Missing CallSid parameter")
-                    return
-            except WebSocketDisconnect:
-                logger.warning("❌ WebSocket disconnected before CallSid could be found.")
-                return
-            except Exception as e:
-                logger.error(f"❌ Error receiving messages to find CallSid: {e}")
-                return
-        
-        # Ensure connection is registered (if query param was present)
-        if callSid not in manager.active_connections:
-            manager.active_connections[callSid] = ws
-            logger.info(f"WebSocket connection established for CallSid={callSid}")
-        
         # Push updated metrics for active call count
         try:
             await _broadcast_ops_metrics()
         except Exception:
             pass
-        
-        # Start receiving messages
-        try:
-            while True:
-                msg = await ws.receive_text()
-                asyncio.create_task(handle_media_packet(callSid, msg))
-        except WebSocketDisconnect:
-            logger.info(f"WebSocket disconnected for CallSid={callSid}")
-        except Exception as e:
-            logger.error(f"WebSocket error for CallSid={callSid}: {e}")
-        finally:
-            try:
-                _finalize_call_metrics(callSid)
-            except Exception:
-                pass
-            try:
-                await _broadcast_ops_metrics()
-            except Exception:
-                pass
-            await manager.disconnect(callSid)
-            
+
+        # Main receive loop
+        while True:
+            msg = await ws.receive_text()
+            asyncio.create_task(handle_media_packet(call_sid, msg))
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for CallSid={call_sid}")
     except Exception as e:
-        logger.error(f"WebSocket connection failed: {e}")
+        logger.error(f"WebSocket error for CallSid={call_sid}: {e}")
         try:
             await ws.close(code=1011, reason="Internal server error")
-        except:
+        except Exception:
             pass
+    finally:
+        # Finalize metrics and cleanup
+        try:
+            if call_sid:
+                _finalize_call_metrics(call_sid)
+        except Exception:
+            pass
+        try:
+            await _broadcast_ops_metrics()
+        except Exception:
+            pass
+        if call_sid:
+            tts_version_counter.pop(call_sid, None)
+            await manager.disconnect(call_sid)
 
 #---------------MEDIA PROCESSING---------------
 async def handle_media_packet(call_sid: str, msg: str):
@@ -1069,6 +1265,11 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
         elif mean_lp is not None and mean_lp < -1.0:
             should_suppress = True
         
+        # Always accept brief confirmations even if low-confidence
+        confirm_phrases = {"done", "finished", "completed", "yes"}
+        if any(p in normalized for p in confirm_phrases):
+            should_suppress = False
+        
         if should_suppress:
             logger.info(f"Suppressed low-confidence/short transcription for {call_sid}: '{text}' (avg_logprob={mean_lp})")
             return
@@ -1089,6 +1290,12 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             call_info_store[call_sid] = info
         except Exception as e:
             logger.debug(f"Duplicate transcript guard failed for {call_sid}: {e}")
+
+        # Broadcast real-time transcript to ops dashboard
+        try:
+            asyncio.create_task(_broadcast_transcript(call_sid, text))
+        except Exception:
+            pass
 
         # Post-booking Q&A flow
         dialog = call_dialog_state.get(call_sid)
@@ -1125,8 +1332,14 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             await push_twiml_to_call(call_sid, twiml)
             return
 
-        # Scheduling/path follow-up handling
-        if dialog and dialog.get('step') in ('awaiting_path_choice', 'awaiting_time', 'awaiting_time_confirm'):
+        # Scheduling/path and confirmation follow-up handling
+        if dialog and dialog.get('step') in (
+            'awaiting_path_choice',
+            'awaiting_time',
+            'awaiting_time_confirm',
+            'awaiting_location_confirm',
+            'awaiting_operator_confirm',
+        ):
             logger.info(f"Handling follow-up scheduling/path utterance for {call_sid}: '{text}'")
             twiml = await handle_intent(call_sid, dialog.get('intent', {}), followup_text=text)
             await push_twiml_to_call(call_sid, twiml)
@@ -1134,6 +1347,17 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
 
         # Otherwise, extract a fresh intent
         intent = await extract_intent_from_text(call_sid, text)
+        # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
+        info = call_info_store.get(call_sid, {})
+        segments_count = int(info.get('segments_count', 0)) + 1
+        info['segments_count'] = segments_count
+        call_info_store[call_sid] = info
+        explicit_time = parse_human_datetime(text) or gpt_infer_datetime_phrase(text)
+        explicit_emergency = contains_emergency_keywords(text)
+        if segments_count < 2 and not explicit_time and not explicit_emergency and not is_affirmative_response(text):
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+            logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
+            return
         twiml = await handle_intent(call_sid, intent)
         await push_twiml_to_call(call_sid, twiml)
             
@@ -1295,18 +1519,22 @@ async def synthesize_tts(text: str) -> Optional[bytes]:
 
 async def add_tts_or_say_to_twiml(target, call_sid: str, text: str):
     speak_text = text.replace("_", " ")
+    preview = speak_text if len(speak_text) <= 200 else speak_text[:200] + "..."
     if settings.FORCE_SAY_ONLY:
-        logger.info(f"FORCE_SAY_ONLY enabled; using <Say> for CallSid={call_sid}")
+        logger.info(f"🗣️ TTS SAY for CallSid={call_sid}: {preview}")
         target.say(speak_text)
         return
     audio = await synthesize_tts(speak_text)
     if audio:
         tts_audio_store[call_sid] = audio
-        audio_url = f"{settings.EXTERNAL_WEBHOOK_URL}/tts/{call_sid}.mp3"
-        logger.info(f"Using ElevenLabs TTS for CallSid={call_sid} ({len(audio)} bytes)")
+        # Bump version so TwiML <Play> URL changes each time (prevents identical-string dedupe)
+        v = int(tts_version_counter.get(call_sid, 0)) + 1
+        tts_version_counter[call_sid] = v
+        audio_url = f"{settings.EXTERNAL_WEBHOOK_URL}/tts/{call_sid}.mp3?v={v}"
+        logger.info(f"🗣️ TTS PLAY for CallSid={call_sid}: url={audio_url} bytes={len(audio)} text={preview}")
         target.play(audio_url)
     else:
-        logger.info(f"Using TwiML <Say> for CallSid={call_sid}")
+        logger.info(f"🗣️ TTS SAY (fallback) for CallSid={call_sid}: {preview}")
         target.say(speak_text)
 
 # Push updated TwiML mid-call to Twilio
@@ -1736,33 +1964,44 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         import dateutil.parser
         text_norm = (followup_text or '').lower().strip()
         state = call_dialog_state.get(call_sid, {}) or {}
+        # New: if utterance doesn't match any recognizable intent cues, ask to repeat
+        if is_noise_or_unknown(text_norm):
+            await add_tts_or_say_to_twiml(twiml, call_sid, "Sorry, I didn't catch that. Could you please repeat what you said?")
+            # Keep current step or default to path choice
+            if not state.get('step'):
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+            else:
+                call_dialog_state[call_sid] = state
+            append_stream_and_pause(twiml)
+            return twiml
         # New: awaiting_location_confirm step
         if state.get('step') == 'awaiting_location_confirm':
             if any(k in text_norm for k in ['done', 'finished', 'completed', 'yes']):
-                present = await _magiclink_check_status(call_sid)
-                if present:
-                    # After location is received, ask to confirm the held time
-                    suggested_time = state.get('suggested_time')
-                    if isinstance(suggested_time, datetime):
-                        await add_tts_or_say_to_twiml(
-                            twiml,
-                            call_sid,
-                            f"Thanks, we received your location. Would you like me to book {_format_slot(suggested_time)}?"
-                        )
-                        state['step'] = 'awaiting_time_confirm'
-                        call_dialog_state[call_sid] = state
-                        append_stream_and_pause(twiml)
-                        return twiml
-                    # No time held; ask for date/time
-                    await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks, we received your location. Please say a date and time, like 'Friday at 3 PM'.")
-                    state['step'] = 'awaiting_time'
-                    call_dialog_state[call_sid] = state
-                    append_stream_and_pause(twiml)
-                    return twiml
-                else:
-                    await add_tts_or_say_to_twiml(twiml, call_sid, "I haven't received your location yet. Please open the link I texted and allow location access, then say 'done'.")
-                    append_stream_and_pause(twiml)
-                    return twiml
+                # TEMP: bypass location presence check; proceed as if location is present
+                # present = await _magiclink_check_status(call_sid)
+                # if present:
+                     # After location is received, ask to confirm the held time
+                     suggested_time = state.get('suggested_time')
+                     if isinstance(suggested_time, datetime):
+                         await add_tts_or_say_to_twiml(
+                             twiml,
+                             call_sid,
+                             f"Thanks, we received your location. Would you like me to book {_format_slot(suggested_time)}?"
+                         )
+                         state['step'] = 'awaiting_time_confirm'
+                         call_dialog_state[call_sid] = state
+                         append_stream_and_pause(twiml)
+                         return twiml
+                     # No time held; ask for date/time
+                     await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks, we received your location. Please say a date and time, like 'Friday at 3 PM'.")
+                     state['step'] = 'awaiting_time'
+                     call_dialog_state[call_sid] = state
+                     append_stream_and_pause(twiml)
+                     return twiml
+                # else:
+                #     await add_tts_or_say_to_twiml(twiml, call_sid, "I haven't received your location yet. Please open the link I texted and allow location access, then say 'done'.")
+                #     append_stream_and_pause(twiml)
+                #     return twiml
         if state.get('step') == 'awaiting_operator_confirm':
             finalized = await _finalize_booking_if_ready(call_sid)
             if finalized:
@@ -2111,6 +2350,23 @@ def pcm_to_wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
         wf.writeframes(pcm)
     return buf.getvalue()
 
+def contains_emergency_keywords(text: str) -> bool:
+    norm = " ".join((text or "").lower().split())
+    keywords = [
+        "emergency",
+        "burst pipe",
+        "pipe burst",
+        "water everywhere",
+        "flooding",
+        "sewage",
+        "sewer backup",
+        "gas leak",
+    ]
+    for k in keywords:
+        if k in norm:
+            return True
+    return False
+
 #---------------MAIN---------------
 if __name__ == "__main__":
     import uvicorn
@@ -2122,3 +2378,25 @@ if __name__ == "__main__":
         ssl_certfile=settings.SSL_CERT_FILE,
         log_level=settings.LOG_LEVEL.lower()
     )
+
+# Heuristic: detect noise/unknown utterances with no recognizable intent cues
+def is_noise_or_unknown(text: str) -> bool:
+    norm = " ".join((text or "").lower().strip().strip(".,!?").split())
+    if not norm:
+        return True
+    # If affirmative/negative or contains path/time cues, it's not noise
+    if is_affirmative_response(norm) or is_negative_response(norm):
+        return False
+    # Common scheduling and intent cue words
+    cue_words = {
+        'emergency','urgent','immediately','schedule','book','appointment','technician','today','tomorrow','tonight',
+        'morning','afternoon','evening','am','pm','earliest','soon','asap','next','this','monday','tuesday','wednesday','thursday','friday','saturday','sunday'
+    }
+    tokens = set(norm.split())
+    if tokens & cue_words:
+        return False
+    # If contains any digit, likely not pure noise
+    if re.search(r"\d", norm):
+        return False
+    # Single very short/uncommon word → treat as noise
+    return len(tokens) <= 2
