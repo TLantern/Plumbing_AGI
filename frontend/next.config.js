@@ -6,6 +6,9 @@ const nextConfig = {
     NEXTAUTH_SECRET: 'devsecret_please_change_me',
     AUTH_USERNAME: 'admin',
     AUTH_PASSWORD: 'admin',
+    NEXT_PUBLIC_OPERATOR_API_KEY: 'opkey',
+    NEXT_PUBLIC_BACKEND_HTTP: 'http://localhost:5001',
+    NEXT_PUBLIC_BACKEND_WS: 'ws://localhost:5001/ops',
   },
   // Ensure no experimental mismatches and opt into stable defaults
   poweredByHeader: false,

@@ -103,7 +103,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-WHISPER_MODEL = "whisper-1"
+TRANSCRIPTION_MODEL = "whisper-1"
 
 # VAD Configuration
 VAD_AGGRESSIVENESS = 3  # 0-3, higher = more aggressive filtering
@@ -674,25 +674,25 @@ async def _send_booking_to_operator(call_sid: str, intent: dict, suggested_time:
         job = intent.get('job', {})
         location = intent.get('location', {})
         
-        booking_data = {
-            "type": "booking_confirmation",
-            "call_sid": call_sid,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "customer": {
-                "name": customer.get('name') or 'Customer',
-                "phone": customer.get('phone') or call_info.get('from', ''),
-                "location": location.get('raw_address') or f"{call_info.get('from_city', '')}, {call_info.get('from_state', '')}"
+        # Normalize job payload to match frontend expectation
+        appt_iso = suggested_time.isoformat()
+        if not appt_iso.endswith('Z') and '+' not in appt_iso:
+            appt_iso = appt_iso + 'Z'
+        job_payload = {
+            "customer_phone": customer.get('phone') or call_info.get('from', ''),
+            "customer_name": customer.get('name') or 'Customer',
+            "service_type": job.get('type') or 'plumbing_service',
+            "appointment_time": appt_iso,
+            "address": location.get('raw_address') or f"{call_info.get('from_city', '')}, {call_info.get('from_state', '')}",
+            "notes": job.get('description', '') or '',
+        }
+        payload = {
+            "type": "job_description",
+            "data": {
+                "callSid": call_sid,
+                "job": job_payload,
+                "ts": datetime.utcnow().isoformat() + "Z",
             },
-            "service": {
-                "type": job.get('type') or 'plumbing_service',
-                "description": job.get('description', ''),
-                "urgency": job.get('urgency', 'flex')
-            },
-            "appointment": {
-                "suggested_time": suggested_time.isoformat(),
-                "formatted_time": _format_slot(suggested_time)
-            },
-            "status": "awaiting_operator_approval"
         }
         
         # Broadcast to all connected ops WebSocket clients
@@ -700,14 +700,14 @@ async def _send_booking_to_operator(call_sid: str, intent: dict, suggested_time:
             disconnected = set()
             for ws in ops_ws_clients:
                 try:
-                    await ws.send_json(booking_data)
+                    await ws.send_json(payload)
                 except Exception as e:
                     logger.debug(f"Failed to send booking to ops client: {e}")
                     disconnected.add(ws)
             # Clean up disconnected clients
             for ws in disconnected:
                 ops_ws_clients.discard(ws)
-            
+        
         logger.info(f"📤 Sent booking confirmation to {len(ops_ws_clients)} operator client(s)")
         
     except Exception as e:
@@ -1341,7 +1341,7 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             wav_for_whisper = pcm_to_wav_bytes(converted, target_rate)
             logger.debug(f"Resampled audio for Whisper from {sample_rate} Hz to {target_rate} Hz")
         
-        logger.info(f"Sending audio to Whisper for {call_sid} (model: {WHISPER_MODEL})")
+        logger.info(f"Sending audio to Whisper for {call_sid} (model: {TRANSCRIPTION_MODEL})")
         start_time = time.time()
         
         wav_file = io.BytesIO(wav_for_whisper)
@@ -1351,15 +1351,15 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             pass
         
         resp = client.audio.transcriptions.create(
-            model=WHISPER_MODEL,
+            model=TRANSCRIPTION_MODEL,
             file=wav_file,
             response_format="verbose_json",
             language="en",
             prompt="Caller is describing a plumbing issue or asking a question. Ignore background noise, dial tones, and hangup signals."
         )
         
-        whisper_duration = time.time() - start_time
-        logger.info(f"Whisper processing completed for {call_sid} in {whisper_duration:.2f}s")
+        transcription_duration = time.time() - start_time
+        logger.info(f"Whisper transcription completed for {call_sid} in {transcription_duration:.2f}s")
         
         text = (resp.text or "").strip()
         # Confidence/quality gating using segments avg_logprob
@@ -1387,7 +1387,13 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             should_suppress = True
         
         # Always accept brief confirmations even if low-confidence
-        confirm_phrases = {"done", "finished", "completed", "yes", "okay", "ok"}
+        confirm_phrases = {
+            "done", "finished", "completed", "yes", "okay", "ok", "no", "nope", "nah", "no thanks", "no thank you",
+            "yeah", "yep", "yup", "sure", "right", "correct", "exactly", "absolutely", "definitely",
+            "uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet", "indeed", "certainly",
+            "uh uh", "nuh uh", "mm mm", "not really", "negative", "that's not right", "that's wrong",
+            "incorrect", "maybe not", "probably not"
+        }
         if any(p in normalized for p in confirm_phrases):
             should_suppress = False
             logger.info(f"🎯 Accepting confirmation phrase '{text}' despite low confidence for {call_sid}")
@@ -1396,7 +1402,7 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             logger.info(f"Suppressed low-confidence/short transcription for {call_sid}: '{text}' (avg_logprob={mean_lp})")
             return
         
-        logger.info(f'🎤 USER SPEECH ({call_sid}): "{text}" [duration: {audio_duration_ms:.0f}ms, whisper_time: {whisper_duration:.2f}s, avg_logprob: {mean_lp}]')
+        logger.info(f'🎤 USER SPEECH ({call_sid}): "{text}" [duration: {audio_duration_ms:.0f}ms, transcription_time: {transcription_duration:.2f}s, avg_logprob: {mean_lp}]')
         # Suppress duplicate transcripts within a short window to avoid repeated prompts
         try:
             normalized_text = " ".join(text.lower().split())
@@ -1612,38 +1618,40 @@ def infer_urgency_from_text(text: str) -> str:
     
     return 'flex'  # Default to flexible
 
-# TTS: synthesize with Eleven Labs
+# TTS: synthesize with OpenAI 4o TTS
 async def synthesize_tts(text: str) -> Optional[bytes]:
-    if not settings.ELEVENLABS_API_KEY:
-        return None
-    voice_id = settings.ELEVENLABS_VOICE_ID or "21m00Tcm4TlvDq8ikWAM"  # default voice
-    model_id = settings.ELEVENLABS_MODEL_ID or "eleven_multilingual_v2"
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-    headers = {
-        "xi-api-key": settings.ELEVENLABS_API_KEY,
-        "accept": "audio/mpeg",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "text": text,
-        "model_id": model_id,
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75
-        }
-    }
-    async with httpx.AsyncClient(timeout=30) as http:
-        r = await http.post(url, headers=headers, json=payload)
-        if r.status_code == 200 and r.content:
-            return r.content
-        logger.error(f"ElevenLabs TTS failed: {r.status_code} {r.text}")
+    try:
+        voice = getattr(settings, 'OPENAI_TTS_VOICE', 'alloy')  # Default to 'alloy' voice
+        model = getattr(settings, 'OPENAI_TTS_MODEL', 'tts-1')  # Default to 'tts-1' model
+        
+        response = client.audio.speech.create(
+            model=model,
+            voice=voice,
+            input=text,
+            response_format="mp3"
+        )
+        
+        # Convert response to bytes
+        audio_content = b""
+        for chunk in response.iter_bytes():
+            audio_content += chunk
+            
+        if audio_content:
+            logger.debug(f"OpenAI TTS generated {len(audio_content)} bytes for text: {text[:50]}...")
+            return audio_content
+        else:
+            logger.error("OpenAI TTS returned empty response")
+            return None
+            
+    except Exception as e:
+        logger.error(f"OpenAI TTS failed: {e}")
         return None
 
 async def add_tts_or_say_to_twiml(target, call_sid: str, text: str):
     speak_text = text.replace("_", " ")
     preview = speak_text if len(speak_text) <= 200 else speak_text[:200] + "..."
     if settings.FORCE_SAY_ONLY:
-        logger.info(f"🗣️ TTS SAY for CallSid={call_sid}: {preview}")
+        logger.info(f"🗣️ OpenAI TTS SAY for CallSid={call_sid}: {preview}")
         target.say(speak_text)
         return
     audio = await synthesize_tts(speak_text)
@@ -1653,10 +1661,10 @@ async def add_tts_or_say_to_twiml(target, call_sid: str, text: str):
         v = int(tts_version_counter.get(call_sid, 0)) + 1
         tts_version_counter[call_sid] = v
         audio_url = f"{settings.EXTERNAL_WEBHOOK_URL}/tts/{call_sid}.mp3?v={v}"
-        logger.info(f"🗣️ TTS PLAY for CallSid={call_sid}: url={audio_url} bytes={len(audio)} text={preview}")
+        logger.info(f"🗣️ OpenAI TTS PLAY for CallSid={call_sid}: url={audio_url} bytes={len(audio)} text={preview}")
         target.play(audio_url)
     else:
-        logger.info(f"🗣️ TTS SAY (fallback) for CallSid={call_sid}: {preview}")
+        logger.info(f"🗣️ OpenAI TTS SAY (fallback) for CallSid={call_sid}: {preview}")
         target.say(speak_text)
 
 # Push updated TwiML mid-call to Twilio
@@ -1775,7 +1783,7 @@ def should_handoff_to_human(args: dict, confidence: dict) -> bool:
     overall_confidence = confidence.get("overall", 0.0)
     
     # Handoff if overall confidence is low
-    if overall_confidence < 0.6:
+    if overall_confidence < 0.7:
         return True
     
     # Handoff if critical fields are missing
@@ -1815,6 +1823,53 @@ NEGATIVE_PATTERNS = {
     "nah", "we're good", "we are good", "all good", "goodbye", "bye", "hang up", "end call"
 }
 
+# Goodbye/closing statement patterns
+GOODBYE_PATTERNS = {
+    "thank you for listening", "thank you for watching", "see you next time", "goodbye", "bye",
+    "that's all", "that is all", "we're done", "we are done", "have a good day", "take care",
+    "thanks for your time", "appreciate it", "no thank you", "nothing else", "all set", "we're good"
+}
+
+def is_goodbye_statement(text: str) -> bool:
+    """Detect if user is trying to end the call politely"""
+    norm = " ".join(text.lower().split())
+    
+    # Check for exact matches
+    if norm in GOODBYE_PATTERNS:
+        return True
+    
+    # Check for partial matches
+    goodbye_keywords = [
+        "thank you for listening", "thank you for watching", "see you next time",
+        "have a good day", "take care", "thanks for your time", "appreciate it",
+        "we're done", "we are done", "all set", "we're good", "we are good"
+    ]
+    
+    for pattern in goodbye_keywords:
+        if pattern in norm:
+            return True
+    
+    return False
+
+def has_no_clear_service_intent(intent: dict) -> bool:
+    """Check if the intent lacks clear plumbing service indicators"""
+    confidence = intent.get('confidence', {})
+    overall_confidence = confidence.get('overall', 0.0)
+    
+    # Very low confidence indicates unclear intent
+    if overall_confidence < 0.3:
+        return True
+    
+    # Missing critical information
+    job_type = intent.get('job', {}).get('type')
+    job_description = intent.get('job', {}).get('description', '')
+    
+    # No specific job type and very generic description
+    if not job_type or job_type == 'None':
+        return True
+    
+    return False
+
 def is_negative_response(text: str) -> bool:
     norm = " ".join(text.lower().split())
     if norm in NEGATIVE_PATTERNS:
@@ -1828,7 +1883,10 @@ def is_negative_response(text: str) -> bool:
 # Positive/affirmative detection
 AFFIRMATIVE_PATTERNS = {
     "yes", "yeah", "yep", "affirmative", "correct", "that works", "sounds good", "please do",
-    "book it", "go ahead", "confirm", "let's do it", "schedule it", "do it"
+    "book it", "go ahead", "confirm", "let's do it", "schedule it", "do it", "done", "sure",
+    "okay", "ok", "right", "exactly", "absolutely", "definitely", "uh huh", "mm hmm", "mhm",
+    "for sure", "of course", "you bet", "indeed", "certainly", "sounds right", "looks good",
+    "that sounds right", "that's right", "that is right", "i agree", "agreed"
 }
 
 def is_affirmative_response(text: str) -> bool:
@@ -1838,7 +1896,11 @@ def is_affirmative_response(text: str) -> bool:
     # Token-based checks
     words = norm.split()
     # Short generic confirmations only (avoid long sentences like "yeah, my ...")
-    if len(words) <= 3 and words[0] in {"yes", "yeah", "yep", "yup", "ok", "okay", "sure", "correct", "affirmative"}:
+    if len(words) <= 3 and words[0] in {"yes", "yeah", "yep", "yup", "ok", "okay", "sure", "correct", "affirmative", "done", "right", "exactly", "absolutely", "definitely"}:
+        return True
+    # Vocal confirmations that might be transcribed differently
+    vocal_confirms = ["uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet"]
+    if norm in vocal_confirms:
         return True
     # Explicit booking/confirmation phrases anywhere in the utterance
     explicit_patterns = [
@@ -1855,6 +1917,62 @@ def is_affirmative_response(text: str) -> bool:
     for pat in explicit_patterns:
         if re.search(pat, norm):
             return True
+    return False
+
+# STRICT yes/no confirmation for appointment scheduling
+STRICT_YES_PATTERNS = {
+    "yes", "yeah", "yep", "yup", "affirmative", "correct", "that's right", "that is right",
+    "sure", "okay", "ok", "right", "exactly", "absolutely", "definitely", 
+    "uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet", "indeed", "certainly"
+}
+
+STRICT_NO_PATTERNS = {
+    "no", "nope", "nah", "not that time", "that doesn't work", "that does not work",
+    "uh uh", "nuh uh", "mm mm", "not really", "negative", "that's not right", "that's wrong",
+    "incorrect", "maybe not", "probably not", "i don't think so", "i don't agree"
+}
+
+def is_strict_affirmative_response(text: str) -> bool:
+    """Strict yes detection for appointment confirmation - only accepts clear affirmatives"""
+    norm = " ".join((text or "").lower().strip().strip(".,!?").split())
+    # Must be exact match or start with yes/yeah/yep
+    if norm in STRICT_YES_PATTERNS:
+        return True
+    words = norm.split()
+    if len(words) <= 2 and words[0] in {"yes", "yeah", "yep", "yup", "correct", "affirmative", "sure", "okay", "ok", "right", "exactly", "absolutely", "definitely"}:
+        return True
+    # Accept repeated affirmative tokens only (e.g., "yes yes yes", "yeah yep")
+    allowed_yes_tokens = {"yes", "yeah", "yep", "yup", "ok", "okay", "correct", "affirmative", "sure", "right", "exactly", "absolutely", "definitely"}
+    if words and all(w in allowed_yes_tokens for w in words):
+        return True
+    # Vocal confirmations
+    vocal_confirms = ["uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet"]
+    if norm in vocal_confirms:
+        return True
+    return False
+
+def is_strict_negative_response(text: str) -> bool:
+    """Strict no detection for appointment confirmation - only accepts clear negatives"""
+    norm = " ".join((text or "").lower().strip().strip(".,!?").split())
+    if norm in STRICT_NO_PATTERNS:
+        return True
+    words = norm.split()
+    if len(words) <= 2 and words[0] in {"no", "nope", "nah", "negative"}:
+        return True
+    # Accept repeated negative tokens and common polite closers (e.g., "no no nah no thanks")
+    filler_tokens = {"thanks", "thank", "you"}
+    filtered = [w for w in words if w not in filler_tokens]
+    allowed_no_tokens = {"no", "nope", "nah", "negative"}
+    if filtered and all(w in allowed_no_tokens for w in filtered):
+        return True
+    # Vocal negations
+    vocal_negatives = ["uh uh", "nuh uh", "mm mm", "not really", "maybe not", "probably not"]
+    if norm in vocal_negatives:
+        return True
+    # Common negative phrases
+    negative_phrases = ["i don't think so", "i don't agree", "that's not right", "that's wrong"]
+    if norm in negative_phrases:
+        return True
     return False
 
 def _speakable(text: Optional[str]) -> str:
@@ -2096,6 +2214,27 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         resp.pause(length=3600)
         logger.info(f"Appended stream resume to TwiML for {call_sid} -> {wss_url_local}")
 
+    # Check for goodbye statements or unclear service intent BEFORE proceeding with booking flow
+    original_text = followup_text or intent.get('job', {}).get('description', '')
+    confidence = intent.get('confidence', {})
+    
+    # Handle goodbye/closing statements
+    if original_text and is_goodbye_statement(original_text):
+        await add_tts_or_say_to_twiml(twiml, call_sid, "Thank you for calling SafeHarbour Plumbing Services. Have a great day!")
+        return twiml
+    
+    # Handle very low confidence or no clear service intent
+    if not followup_text and has_no_clear_service_intent(intent):
+        await add_tts_or_say_to_twiml(
+            twiml, 
+            call_sid, 
+            "I want to make sure I understand you correctly. What specific plumbing issue can we help you with today? For example, do you have a leak, clog, or need a repair?"
+        )
+        # Set state to await clearer intent
+        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_clear_intent'}
+        append_stream_and_pause(twiml)
+        return twiml
+
     # If followup_text is provided, treat as user's response to scheduling prompt (no <Gather>, keep streaming)
     if followup_text:
         text_norm = (followup_text or '').lower().strip()
@@ -2111,8 +2250,46 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 call_dialog_state[call_sid] = state
             append_stream_and_pause(twiml)
             return twiml
+        
+        # Handle awaiting_clear_intent step - user responding to clarification request
+        if state.get('step') == 'awaiting_clear_intent':
+            # Check if this is still a goodbye statement
+            if is_goodbye_statement(followup_text):
+                await add_tts_or_say_to_twiml(twiml, call_sid, "Thank you for calling SafeHarbour Plumbing Services. Have a great day!")
+                return twiml
+            
+            # Try to extract intent from the clarified response
+            try:
+                from ops_integrations.flows.intents import extract_plumbing_intent
+                new_intent = await extract_plumbing_intent(followup_text)
+                
+                # Check if we now have a clearer intent
+                if new_intent and has_no_clear_service_intent(new_intent):
+                    # Still unclear - politely end the call
+                    await add_tts_or_say_to_twiml(
+                        twiml, 
+                        call_sid, 
+                        "I'm having trouble understanding the specific plumbing issue you need help with. Please feel free to call back when you have a specific plumbing problem, or you can speak directly to one of our dispatchers. Thank you for calling!"
+                    )
+                    return twiml
+                else:
+                    # Now we have a clear intent - proceed with booking flow
+                    logger.info(f"✅ Clarified intent for {call_sid}: {new_intent}")
+                    # Update the intent and proceed with normal flow
+                    intent.update(new_intent)
+                    # Continue to normal flow handling below
+                    
+            except Exception as e:
+                logger.error(f"Failed to re-extract intent for {call_sid}: {e}")
+                await add_tts_or_say_to_twiml(
+                    twiml, 
+                    call_sid, 
+                    "I'm having trouble understanding. Let me connect you with one of our dispatchers who can better assist you."
+                )
+                return twiml
+        
         # New: awaiting_location_confirm step
-        if state.get('step') == 'awaiting_location_confirm':
+        if False and state.get('step') == 'awaiting_location_confirm':
             logger.info(f"🔍 In awaiting_location_confirm step for {call_sid}, text: '{text_norm}'")
             # Check if this is a duplicate of last processed text to prevent double-processing
             last_processed = state.get('last_processed_text', '')
@@ -2206,48 +2383,35 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 await add_tts_or_say_to_twiml(twiml, call_sid, "Please continue to hold while our operator confirms your booking.")
                 append_stream_and_pause(twiml)
                 return twiml
-        # Confirmation step: user can confirm or change the suggested slot
+        # Confirmation step: user can confirm or change the suggested slot - STRICT YES/NO ONLY
         if state.get('step') == 'awaiting_time_confirm':
-            if is_affirmative_response(followup_text):
+            if is_strict_affirmative_response(followup_text):
+                # User said YES - proceed to operator
                 suggested_time = state.get('suggested_time')
                 if isinstance(suggested_time, datetime):
-                    # If location is not yet present, (re)send link and gate on location first
-                    user_ok = await _magiclink_check_status(call_sid)
-                    if not user_ok:
-                        try:
-                            ok = await _send_magiclink_sms(call_sid)
-                            if ok:
-                                await add_tts_or_say_to_twiml(
-                                    twiml,
-                                    call_sid,
-                                    "I just sent a secure link to confirm your location. Please open it and allow location, then say 'done'."
-                                )
-                                state['step'] = 'awaiting_location_confirm'
-                                call_dialog_state[call_sid] = state
-                                append_stream_and_pause(twiml)
-                                return twiml
-                        except Exception as e:
-                            logger.error(f"Magiclink send failed for {call_sid}: {e}")
-                    # Try to finalize if operator already confirmed
-                    finalized = await _finalize_booking_if_ready(call_sid)
-                    if finalized:
-                        await add_tts_or_say_to_twiml(
-                            twiml,
-                            call_sid,
-                            f"Booked. Your {_speakable(job_type)} is set for {_format_slot(suggested_time)}."
-                        )
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'post_booking_qa'}
-                    else:
-                        await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks. We have your location. Our dispatcher will confirm shortly.")
-                        state['step'] = 'awaiting_operator_confirm'
-                        call_dialog_state[call_sid] = state
+                    try:
+                        await _send_booking_to_operator(call_sid, intent, suggested_time)
+                    except Exception as e:
+                        logger.debug(f"Failed to broadcast booking to operator: {e}")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Perfect! I've sent your appointment request to our dispatcher for confirmation. They'll be with you shortly.")
+                    state['step'] = 'awaiting_operator_confirm'
+                    call_dialog_state[call_sid] = state
                     append_stream_and_pause(twiml)
                     return twiml
-            if is_negative_response(followup_text):
-                await add_tts_or_say_to_twiml(twiml, call_sid, "Okay. Tell me another date and time that works, or say 'earliest'.")
+            elif is_strict_negative_response(followup_text):
+                # User said NO - go back to scheduling
+                await add_tts_or_say_to_twiml(twiml, call_sid, "No problem. Tell me what date and time would work better for you, or say 'earliest' for the next available slot.")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
                 append_stream_and_pause(twiml)
                 return twiml
+            else:
+                # Ambiguous response - ask again with strict instructions
+                suggested_time = state.get('suggested_time')
+                if isinstance(suggested_time, datetime):
+                    await add_tts_or_say_to_twiml(twiml, call_sid, f"I need a clear answer. Do you want the appointment at {_format_slot(suggested_time)}? Please say exactly YES if you want it, or NO if you don't.")
+                    # Keep the same state - they stay in confirmation mode
+                    append_stream_and_pause(twiml)
+                    return twiml
             # If user provided a new date/time at confirmation step, re-parse and re-suggest
             newly_parsed = parse_human_datetime(followup_text)
             if newly_parsed:
@@ -2265,8 +2429,8 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                         "operator_confirmed": False,
                         "mocked": True
                     }
-                    await add_tts_or_say_to_twiml(twiml, call_sid, f"I can hold {_format_slot(newly_parsed)}. Just say 'done' when you're ready to confirm.")
-                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': newly_parsed}
+                    await add_tts_or_say_to_twiml(twiml, call_sid, f"I can schedule you for {_format_slot(newly_parsed)}. Do you want this time? Please say YES or NO.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': newly_parsed}
                 else:
                     # Suggest next available 2h window and send location link
                     next_available = newly_parsed + timedelta(hours=2)
@@ -2284,10 +2448,10 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     #     ok = False
                     ok = True  # Skip SMS for now, just wait for "done"
                     if ok:
-                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Just say 'done' when you're ready to confirm.")
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': next_available}
+                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO.")
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
                     else:
-                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?")
+                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO.")
                         call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
                 append_stream_and_pause(twiml)
                 return twiml
@@ -2318,14 +2482,14 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                         await add_tts_or_say_to_twiml(
                             twiml,
                             call_sid,
-                            f"Understood. The closest available slot is {_format_slot(suggested)}. Just say 'done' when you're ready to confirm."
+                            f"Understood. The closest available slot is {_format_slot(suggested)}. Do you want this time? Please say YES or NO."
                         )
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': suggested}
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
                     else:
                         await add_tts_or_say_to_twiml(
                             twiml,
                             call_sid,
-                            f"Understood. The closest available slot is {_format_slot(suggested)}. Should I book that?"
+                            f"Understood. The closest available slot is {_format_slot(suggested)}. Do you want this time? Please say YES or NO."
                         )
                         call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
                 except Exception as e:
@@ -2365,14 +2529,14 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                             await add_tts_or_say_to_twiml(
                                 twiml,
                                 call_sid,
-                                f"Thanks. I can hold {_format_slot(start_time)} for your {_speakable(job_type)}. Just say 'done' when you're ready to confirm."
+                                f"Thanks. I can schedule you for {_format_slot(start_time)} for your {_speakable(job_type)}. Do you want this time? Please say YES or NO."
                             )
-                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': start_time}
+                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': start_time}
                         else:
                             await add_tts_or_say_to_twiml(
                                 twiml,
                                 call_sid,
-                                f"Thanks. I can hold {_format_slot(start_time)} for your {_speakable(job_type)}. Should I book it?"
+                                f"Thanks. I can schedule you for {_format_slot(start_time)} for your {_speakable(job_type)}. Do you want this time? Please say YES or NO."
                             )
                             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': start_time}
                     else:
@@ -2395,14 +2559,14 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                             await add_tts_or_say_to_twiml(
                                 twiml,
                                 call_sid,
-                                f"That time looks busy. The next available is {_format_slot(next_available)}. Just say 'done' when you're ready to confirm."
+                                f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO."
                             )
-                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': next_available}
+                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
                         else:
                             await add_tts_or_say_to_twiml(
                                 twiml,
                                 call_sid,
-                                f"That time looks busy. The next available is {_format_slot(next_available)}. Would you like that?"
+                                f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO."
                             )
                             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
                 except Exception as e:
@@ -2442,10 +2606,10 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             #     ok = False
             ok = True  # Skip SMS for now, just wait for "done"
             if ok:
-                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Just say 'done' when you're ready to confirm.")
-                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_location_confirm', 'suggested_time': suggested}
+                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Do you want this time? Please say YES or NO.")
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
             else:
-                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Should I book that?")
+                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Do you want this time? Please say YES or NO.")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
         except Exception as e:
             logger.error(f"Emergency slot suggestion failed: {e}")

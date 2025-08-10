@@ -73,7 +73,9 @@ AUDIO_TEST_CASES = [
 ]
 
 def create_test_audio_with_tts(text: str, filename: str) -> str:
-    """Create test audio using OpenAI TTS"""
+    """Create test audio using OpenAI 4o TTS"""
+    print(f"🔊 Generating OpenAI 4o TTS audio for: '{text[:50]}...'")
+    
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     try:
@@ -81,21 +83,23 @@ def create_test_audio_with_tts(text: str, filename: str) -> str:
         response = client.audio.speech.create(
             model="tts-1",
             voice="alloy",
-            input=text,
-            response_format="wav"
+            input=text
         )
         
-        # Save to file
-        with open(filename, 'wb') as f:
+        # Get the current script directory
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        audio_path = os.path.join(current_dir, filename)
+        
+        # Save the audio file
+        with open(audio_path, "wb") as f:
             f.write(response.content)
         
-        print(f"🎵 Generated audio: {filename}")
-        return filename
+        print(f"✅ Audio saved to: {audio_path}")
+        return audio_path
         
     except Exception as e:
-        print(f"❌ TTS generation failed: {e}")
-        # Fallback: create silent audio
-        return create_silent_audio(filename)
+        print(f"❌ OpenAI 4o TTS generation failed: {e}")
+        return None
 
 def create_silent_audio(filename: str, duration_seconds: int = 5) -> str:
     """Create silent audio as fallback"""

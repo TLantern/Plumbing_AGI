@@ -147,6 +147,7 @@ export default function LiveOpsDashboard() {
 
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const [transcripts, setTranscripts] = useState<Array<{ callSid: string; text: string; intent?: string; ts: string }>>([]);
+  const [activeCallSids, setActiveCallSids] = useState<string[]>([]);
 
   const wsUrl = useMemo(() => {
     if (typeof window === 'undefined') return null;
@@ -169,6 +170,9 @@ export default function LiveOpsDashboard() {
     notes?: string;
   } | null>(null);
   const [highlightActions, setHighlightActions] = useState(false);
+  const [overrideMode, setOverrideMode] = useState(false);
+  const [overrideDate, setOverrideDate] = useState<Date | null>(null);
+  const [overrideSlot, setOverrideSlot] = useState<Date | null>(null);
 
   // Helper functions for intent display
   const getIntentColor = (intent: string): string => {
@@ -201,9 +205,19 @@ export default function LiveOpsDashboard() {
     onMessage: (msg) => {
       if (msg?.type === 'metrics' && msg.data) {
         setMetrics((prev) => ({ ...prev, ...msg.data }));
+        const recents = msg.data?.recentCalls || [];
+        const active = new Set<string>();
+        recents.forEach((c: any) => { if (c.answered && !c.end_ts) active.add(c.call_sid); });
+        setActiveCallSids(Array.from(active));
+        // Note: Don't clear transcripts here - only clear when full conversation ends
+        // Individual call ends don't mean the full conversation is over
       }
       if (msg?.type === 'transcript' && msg.data) {
         setTranscripts((prev) => [...prev.slice(-199), msg.data]);
+      }
+      if (msg?.type === 'conversation_ended' && msg.data?.callSid) {
+        // Clear transcripts only when full conversation ends
+        setTranscripts((prev) => prev.filter(t => t.callSid !== msg.data.callSid));
       }
       if (msg?.type === 'job_description' && msg.data) {
         const jd = msg.data.job || {};
@@ -216,8 +230,23 @@ export default function LiveOpsDashboard() {
           address: jd.address,
           notes: jd.notes,
         });
+        // Auto-select this call in inbox to enable Approve/Override actions
+        setSelectedCall({
+          call_sid: msg.data.callSid,
+          from: jd.customer_phone,
+          to: '',
+          start_ts: Math.floor(Date.now() / 1000),
+          end_ts: 0,
+          duration_sec: 0,
+          answered: true,
+          answer_time_sec: 0,
+        });
         setDrawerOpen(true);
         setHighlightActions(true);
+        // Reset override mode when new job comes in
+        setOverrideMode(false);
+        setOverrideDate(null);
+        setOverrideSlot(null);
       }
     },
     enabled: mounted,
@@ -277,34 +306,66 @@ export default function LiveOpsDashboard() {
 
   async function onApprove() {
     if (!selectedCall) return;
-    const appointment_iso = selectedDate && selectedSlot
-      ? new Date(
-          Date.UTC(
-            selectedDate.getFullYear(),
-            selectedDate.getMonth(),
-            selectedDate.getDate(),
-            selectedSlot.getHours(),
-            selectedSlot.getMinutes(),
-            0,
-            0
-          )
-        ).toISOString()
-      : undefined;
+    
+    // Use job description time by default, or scheduler selection if in override mode
+    let appointment_iso: string | undefined;
+    
+    if (overrideMode && overrideDate && overrideSlot) {
+      // Override mode: use operator-selected time
+      appointment_iso = new Date(
+        Date.UTC(
+          overrideDate.getFullYear(),
+          overrideDate.getMonth(),
+          overrideDate.getDate(),
+          overrideSlot.getHours(),
+          overrideSlot.getMinutes(),
+          0,
+          0
+        )
+      ).toISOString();
+    } else if (jobDesc?.appointment_time) {
+      // Default: use the time from the job description
+      appointment_iso = jobDesc.appointment_time;
+    } else if (selectedDate && selectedSlot) {
+      // Fallback: use scheduler selection
+      appointment_iso = new Date(
+        Date.UTC(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth(),
+          selectedDate.getDate(),
+          selectedSlot.getHours(),
+          selectedSlot.getMinutes(),
+          0,
+          0
+        )
+      ).toISOString();
+    }
+    
     await callAction('/ops/action/approve', {
       call_sid: selectedCall.call_sid,
       appointment_iso,
       note: '',
     });
+    
     setHighlightActions(false);
+    setOverrideMode(false);
+    setDrawerOpen(false);
   }
 
   async function onOverride() {
     if (!selectedCall) return;
+    
+    // Mark as override in backend
     await callAction('/ops/action/override', {
       call_sid: selectedCall.call_sid,
       reason: 'operator override',
     });
-    setHighlightActions(false);
+    
+    // Enable override mode to show date/time picker
+    setOverrideMode(true);
+    setOverrideDate(new Date()); // Default to today
+    setOverrideSlot(null);
+    setHighlightActions(true);
   }
 
   async function onHandoff() {
@@ -314,6 +375,16 @@ export default function LiveOpsDashboard() {
       reason: 'handoff to human',
     });
     setHighlightActions(false);
+  }
+
+  async function onDismiss() {
+    // Simply close the drawer and clear the job description
+    setDrawerOpen(false);
+    setJobDesc(null);
+    setHighlightActions(false);
+    setOverrideMode(false);
+    setOverrideDate(null);
+    setOverrideSlot(null);
   }
 
   const liveTranscripts = transcripts.filter(t => !selectedCall || t.callSid === selectedCall.call_sid);
@@ -515,32 +586,9 @@ export default function LiveOpsDashboard() {
         </div>
       </div>
 
-      {/* Bottom sticky actions */}
+      {/* Bottom sticky SLA clock */}
       <div className="fixed bottom-0 left-0 right-0 border-t border-white/10 bg-black/40 backdrop-blur p-3">
-        <div className="mx-auto max-w-7xl flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Button
-              disabled={!selectedCall}
-              onClick={onApprove}
-              className={highlightActions ? 'ring-2 ring-green-300 shadow-[0_0_20px_rgba(74,222,128,0.4)]' : ''}
-            >
-              Approve
-            </Button>
-            <Button
-              className={cn('bg-yellow-400 text-black hover:opacity-90', highlightActions ? 'ring-2 ring-yellow-300 shadow-[0_0_20px_rgba(250,204,21,0.35)]' : '')}
-              disabled={!selectedCall}
-              onClick={onOverride}
-            >
-              Override
-            </Button>
-            <Button
-              className={cn('bg-blue-400 text-black hover:opacity-90', highlightActions ? 'ring-2 ring-blue-300 shadow-[0_0_20px_rgba(147,197,253,0.35)]' : '')}
-              disabled={!selectedCall}
-              onClick={onHandoff}
-            >
-              Handoff
-            </Button>
-          </div>
+        <div className="mx-auto max-w-7xl flex items-center justify-end gap-3">
           <div className="flex items-center gap-3 text-sm">
             <div className="text-white/70">SLA Clock</div>
             <div className={`px-2 py-1 rounded font-mono ${slaRunning ? (elapsedSec > slaTarget ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300') : 'bg-white/10 text-white/80'}`}>
@@ -565,16 +613,65 @@ export default function LiveOpsDashboard() {
           {jobDesc ? (
             <div className="mt-3 text-center space-y-1">
               <div className="text-lg font-semibold text-white">{jobDesc.service_type}</div>
-              <div className="text-white/90">{jobDesc.customer_name} • {jobDesc.customer_phone}</div>
+              <div className="text-white/90">Customer • {jobDesc.customer_phone || '+19404656984'}</div>
               <div className="text-white/80">{new Date(jobDesc.appointment_time).toLocaleString()}</div>
-              {jobDesc.address ? <div className="text-white/70">{jobDesc.address}</div> : null}
+              {jobDesc.address ? <div className="text-white/70">{jobDesc.address}</div> : <div className="text-white/70">DENTON, TX</div>}
               {jobDesc.notes ? <div className="text-white/60 text-sm mt-2">{jobDesc.notes}</div> : null}
             </div>
           ) : (
             <div className="mt-3 text-center text-white/60">Waiting for job details…</div>
           )}
+          {overrideMode && (
+            <div className="mt-4 space-y-4">
+              <div className="text-sm text-white/70 text-center">Select New Appointment Time</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <MiniCalendar 
+                    date={overrideDate ?? new Date()} 
+                    onSelect={(d) => { setOverrideDate(d); setOverrideSlot(null); }} 
+                  />
+                </div>
+                <div className="space-y-3">
+                  <div className="text-sm text-white/70">Available Time Slots</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {generateTimeSlots(overrideDate ?? new Date(), 8).map((d) => {
+                      const label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const selected = overrideSlot && d.getTime() === overrideSlot.getTime();
+                      return (
+                        <button
+                          key={d.getTime()}
+                          onClick={() => setOverrideSlot(d)}
+                          className={`px-3 py-2 rounded border text-sm ${selected ? 'border-accent bg-accent/20 text-white' : 'border-white/10 hover:bg-white/5 text-white/90'}`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {overrideDate && overrideSlot && (
+                    <div className="text-xs text-white/70">Selected: {overrideDate.toDateString()} @ {overrideSlot.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           <div className="mt-4 flex items-center justify-center gap-3">
-            <Button onClick={() => setDrawerOpen(false)} className="bg-white/10 text-white hover:opacity-90">Dismiss</Button>
+            <Button onClick={onDismiss} className="bg-white/10 text-white hover:opacity-90">Dismiss</Button>
+            <Button 
+              onClick={onApprove}
+              disabled={overrideMode && (!overrideDate || !overrideSlot)}
+              className={highlightActions ? 'ring-2 ring-green-300 shadow-[0_0_20px_rgba(74,222,128,0.4)]' : ''}
+            >
+              {overrideMode ? 'Approve Override' : 'Approve'}
+            </Button>
+            {!overrideMode && (
+              <Button
+                onClick={onOverride}
+                className={cn('bg-yellow-400 text-black hover:opacity-90', highlightActions ? 'ring-2 ring-yellow-300 shadow-[0_0_20px_rgba(250,204,21,0.35)]' : '')}
+              >
+                Override
+              </Button>
+            )}
           </div>
         </div>
       </div>
