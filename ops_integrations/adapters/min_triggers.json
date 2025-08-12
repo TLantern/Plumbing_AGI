@@ -1,0 +1,17 @@
+{
+  "transfer_patterns": [
+    "(smell|odor|smells like).*gas",
+    "gas\\s*(leak|leaking)",
+    "carbon monoxide|\\bco\\b\\s*(alarm|detector|going off)",
+    "(burst|bursting|broken|broke|exploded)\\s*(pipe|line)",
+    "(water|house|home|my place|basement|ceiling)\\s*(is|\\w+ing)\\s*(flood|flooding|leaking|pouring)",
+    "water\\s*everywhere",
+    "(let me speak to|get me|put me through to|transfer me to).*\\b(manager|supervisor|human|agent|dispatcher|representative)\\b",
+    "get me (a|the) (human|agent|dispatcher|manager|representative)",
+    "(landlord|tenant).*(legal|lawyer|attorney|sue|lawsuit|code|habitability|code enforcement)"
+  ],
+  "vip_numbers_e164": [
+    "+19725551234",
+    "+14695550123"
+  ]
+} 

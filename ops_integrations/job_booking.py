@@ -260,10 +260,11 @@ class JobBookingSystem:
 
 # Quick functions for easy job booking
 def book_emergency_job(phone: str, name: str, service: str, address: str = "", notes: str = "") -> Dict[str, Any]:
-    """Quick function to book emergency job (next available slot)."""
+    """Quick function to book emergency job respecting scheduling rules."""
+    from .adapters.phone import find_next_compliant_slot  # lazy import to avoid cycles in adapters
     booking_system = JobBookingSystem()
-    # Schedule for next available slot (1 hour from now)
-    appointment_time = datetime.now() + timedelta(hours=1)
+    earliest = datetime.now() + timedelta(minutes=30)
+    appointment_time = find_next_compliant_slot(earliest, emergency=True)
     return booking_system.book_job(phone, name, service, appointment_time, address, notes)
 
 def book_scheduled_job(phone: str, name: str, service: str, appointment_time: datetime, address: str = "", notes: str = "") -> Dict[str, Any]:

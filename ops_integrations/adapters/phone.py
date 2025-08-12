@@ -41,7 +41,7 @@ except Exception:
     )
     from job_booking import book_emergency_job, book_scheduled_job
     from google_calendar import CalendarAdapter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 try:
     import webrtcvad  # type: ignore
 except Exception:
@@ -170,6 +170,8 @@ from twilio.twiml.voice_response import Gather
 
 # Magiclink per-call state
 magiclink_state: dict[str, dict] = {}
+
+MAX_UNCLEAR_ATTEMPTS = 2
 
 #---------------LOGGING SETUP---------------
 logging.basicConfig(
@@ -455,37 +457,99 @@ async def _magiclink_check_status(call_sid: str) -> bool:
     # Otherwise return False (no location yet)
     return False
 
-async def _send_magiclink_sms(call_sid: str) -> bool:
-    """Mock SMS sending - return success without actually sending for A2P approval wait"""
+async def _send_magiclink_email(to_email: str, link: str) -> bool:
+    """Send location verification link via SMTP email. Returns True if sent."""
     try:
-        # Mock the token response
-        token_resp = {
-            "token": f"mock_token_{call_sid}",
-            "jti": f"mock_jti_{call_sid}",
-            "exp": int(time.time()) + 3600
-        }
-        token = token_resp.get("token")
-        
-        call_info = call_info_store.get(call_sid, {})
-        to_number = call_info.get("from")
-        from_number = settings.TWILIO_SMS_FROM or call_info.get("to")
-        
-        # Mock successful SMS send
-        logger.info(f"🔗 MOCK: Magiclink SMS would be sent to {to_number} from {from_number} (A2P approval pending)")
-        
-        magiclink_state[call_sid] = {
-            "token": token,
-            "jti": token_resp.get("jti"),
-            "exp": token_resp.get("exp"),
-            "sent": True,
-            "user_confirmed": False,
-            "operator_confirmed": False,
-            "mocked": True  # Flag to indicate this was mocked
-        }
-        return True
+        host = os.getenv("SMTP_HOST")
+        port = int(os.getenv("SMTP_PORT", "587"))
+        user = os.getenv("SMTP_USERNAME")
+        password = os.getenv("SMTP_PASSWORD")
+        from_email = os.getenv("SMTP_FROM") or user or "no-reply@safeharbour-plumbing.com"
+        use_tls = (os.getenv("SMTP_USE_TLS", "true").lower() in ("1", "true", "yes"))
+        if not host or not user or not password:
+            logger.warning("SMTP not configured; skipping email fallback")
+            return False
+        subject = "SafeHarbour Plumbing: Location verification link"
+        body = f"Please click this link to share your location so we can dispatch a technician: {link}\n\nIf you did not request this, you can ignore this email."
+        def _send_sync() -> bool:
+            import smtplib
+            from email.message import EmailMessage
+            msg = EmailMessage()
+            msg["Subject"] = subject
+            msg["From"] = from_email
+            msg["To"] = to_email
+            msg.set_content(body)
+            with smtplib.SMTP(host, port, timeout=10) as smtp:
+                if use_tls:
+                    smtp.starttls()
+                smtp.login(user, password)
+                smtp.send_message(msg)
+            return True
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _send_sync)
     except Exception as e:
-        logger.error(f"Failed to mock magiclink SMS for {call_sid}: {e}")
+        logger.error(f"Email fallback failed for {to_email}: {e}")
         return False
+
+async def _send_magiclink_sms(call_sid: str) -> bool:
+    """Deliver location verification link via SMS (ClickSend) with email fallback. Returns True if delivered."""
+    try:
+        token_resp = await _magiclink_mint_token(call_sid)
+    except Exception as e:
+        logger.error(f"Magiclink token mint failed: {e}")
+        token_resp = {"token": f"mock_token_{call_sid}", "jti": f"mock_jti_{call_sid}", "exp": int(time.time()) + 3600, "mocked": True}
+    token = token_resp.get("token") or token_resp.get("access_token") or f"mock_token_{call_sid}"
+    link = f"{settings.MAGICLINK_APP_URL}?token={token}"
+    call_info = call_info_store.get(call_sid, {})
+    to_number = call_info.get("from")
+    message_text = f"SafeHarbour: Please tap to share your location so we can dispatch a technician: {link}"
+
+    # Attempt SMS via ClickSend (SMSAdapter)
+    sms_ok = False
+    try:
+        try:
+            from .sms import SMSAdapter  # type: ignore
+        except Exception:
+            from adapters.sms import SMSAdapter  # type: ignore
+        sms_adapter = SMSAdapter()
+        if getattr(sms_adapter, 'enabled', False) and to_number:
+            result = sms_adapter.send_sms(to_number, message_text)
+            sms_ok = bool(result.get("success"))
+            if sms_ok:
+                logger.info(f"🔗 Magiclink SMS sent to {to_number}")
+            else:
+                logger.warning(f"Magiclink SMS failed for {to_number}: {result}")
+        else:
+            logger.info("SMSAdapter disabled or missing destination number; skipping SMS")
+    except Exception as e:
+        logger.error(f"Magiclink SMS send error: {e}")
+
+    email_ok = False
+    if not sms_ok:
+        # Attempt email fallback using customer email from intent
+        intent = call_dialog_state.get(call_sid, {}).get("intent", {})
+        to_email = (intent.get("customer", {}) or {}).get("email")
+        if to_email:
+            email_ok = await _send_magiclink_email(to_email, link)
+            if email_ok:
+                logger.info(f"🔗 Magiclink email sent to {to_email}")
+        else:
+            logger.warning(f"No customer email available for {call_sid}; email fallback not possible")
+
+    ok = sms_ok or email_ok
+    try:
+        st = magiclink_state.setdefault(call_sid, {})
+        st["token"] = token
+        st["sent"] = ok
+        if token_resp.get("jti"):
+            st["jti"] = token_resp.get("jti")
+        if token_resp.get("exp"):
+            st["exp"] = token_resp.get("exp")
+        st["via"] = "sms" if sms_ok else ("email" if email_ok else "none")
+        magiclink_state[call_sid] = st
+    except Exception:
+        pass
+    return ok
 
 # Operator-facing endpoints
 @app.get("/magiclink/status/{call_sid}")
@@ -610,6 +674,34 @@ async def ops_action_approve(request: Request):
             address=address,
             notes=note,
         )
+        # Sync to Google Sheets CRM (mock or live)
+        try:
+            from .sheets import GoogleSheetsCRM  # type: ignore
+        except Exception:
+            from ops_integrations.adapters.sheets import GoogleSheetsCRM  # type: ignore
+        sheets = GoogleSheetsCRM()
+        booking_row = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "call_sid": call_sid,
+            "customer_name": name,
+            "phone": phone,
+            "service_type": service,
+            "appointment_time_iso": appt.isoformat() + ("" if appt.tzinfo else "Z"),
+            "address": address,
+            "notes": note,
+            "operator_note": note,
+            "source": "operator_confirmed",
+            "city": call_info_store.get(call_sid, {}).get("from_city"),
+            "state": call_info_store.get(call_sid, {}).get("from_state"),
+            "zip": call_info_store.get(call_sid, {}).get("from_zip"),
+            "direction": call_info_store.get(call_sid, {}).get("direction"),
+            "caller_name": call_info_store.get(call_sid, {}).get("caller_name"),
+        }
+        try:
+            sync_res = sheets.sync_booking(booking_row)
+            logger.info(f"Sheets CRM sync on approve: {sync_res}")
+        except Exception as _e:
+            logger.debug(f"Sheets CRM sync skipped/failed: {_e}")
         return JSONResponse(content={"ok": True, "result": result})
     except HTTPException:
         raise
@@ -762,6 +854,37 @@ async def _finalize_booking_if_ready(call_sid: str) -> bool:
             address=address or '',
             notes=notes,
         )
+        # Sync booking to Google Sheets (mock or live)
+        try:
+            from .sheets import GoogleSheetsCRM  # type: ignore
+        except Exception:
+            from ops_integrations.adapters.sheets import GoogleSheetsCRM  # type: ignore
+        sheets = GoogleSheetsCRM()
+        appt_iso = suggested_time.isoformat()
+        if not appt_iso.endswith('Z') and '+' not in appt_iso:
+            appt_iso = appt_iso + 'Z'
+        row = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "call_sid": call_sid,
+            "customer_name": name,
+            "phone": phone,
+            "service_type": job_type,
+            "appointment_time_iso": appt_iso,
+            "address": address or '',
+            "notes": notes or '',
+            "operator_note": (call_info_store.get(call_sid, {}) or {}).get("operator_note"),
+            "source": "operator_confirmed",
+            "city": (call_info_store.get(call_sid, {}) or {}).get("from_city"),
+            "state": (call_info_store.get(call_sid, {}) or {}).get("from_state"),
+            "zip": (call_info_store.get(call_sid, {}) or {}).get("from_zip"),
+            "direction": (call_info_store.get(call_sid, {}) or {}).get("direction"),
+            "caller_name": (call_info_store.get(call_sid, {}) or {}).get("caller_name"),
+        }
+        try:
+            sync_res = sheets.sync_booking(row)
+            logger.info(f"Sheets CRM sync on finalize: {sync_res}")
+        except Exception as _e:
+            logger.debug(f"Sheets CRM sync skipped/failed: {_e}")
         logger.info(f"Booking finalized for {call_sid}")
         return True
     except Exception as e:
@@ -1987,6 +2110,88 @@ def _format_slot(dt: datetime) -> str:
     time_part = dt.strftime("%I:%M %p").lstrip("0")
     return f"{month} {day} at {time_part}"
 
+# Slot rules helpers
+
+def _ceil_to_quarter_hour(dt: datetime) -> datetime:
+    dt = dt.replace(second=0, microsecond=0)
+    minutes = dt.minute
+    remainder = (15 - (minutes % 15)) % 15
+    if remainder == 0:
+        return dt
+    return dt + timedelta(minutes=remainder)
+
+
+def _is_slot_free_with_buffer(
+    candidate_start: datetime,
+    duration_minutes: int = 120,
+    buffer_minutes: int = 60,
+    calendar: Optional[CalendarAdapter] = None,
+) -> bool:
+    try:
+        if calendar is None:
+            calendar = CalendarAdapter()
+        if not getattr(calendar, "enabled", False):
+            return True
+        candidate_start = candidate_start.replace(second=0, microsecond=0)
+        candidate_end = candidate_start + timedelta(minutes=duration_minutes)
+        check_start = candidate_start - timedelta(minutes=buffer_minutes)
+        check_end = candidate_end + timedelta(minutes=buffer_minutes)
+        events = calendar.get_events(start_date=check_start, end_date=check_end)
+        for ev in events or []:
+            s_raw = ((ev.get("start") or {}).get("dateTime") or "")
+            e_raw = ((ev.get("end") or {}).get("dateTime") or "")
+            if not s_raw or not e_raw:
+                continue
+            try:
+                s = datetime.fromisoformat(s_raw.replace("Z", "+00:00"))
+                e = datetime.fromisoformat(e_raw.replace("Z", "+00:00"))
+                # Normalize to naive UTC for comparison with naive check_start/check_end
+                if s.tzinfo is not None:
+                    s = s.astimezone(timezone.utc).replace(tzinfo=None)
+                if e.tzinfo is not None:
+                    e = e.astimezone(timezone.utc).replace(tzinfo=None)
+            except Exception:
+                continue
+            # Overlap if event intersects the [check_start, check_end) window
+            if not (e <= check_start or s >= check_end):
+                return False
+        return True
+    except Exception:
+        return True
+
+
+def find_next_compliant_slot(
+    earliest_start: datetime,
+    emergency: bool = False,
+    duration_minutes: int = 120,
+    search_horizon_hours: int = 72,
+) -> datetime:
+    now = datetime.now()
+    base = earliest_start
+    if emergency:
+        min_emergency_start = now + timedelta(minutes=30)
+        if base < min_emergency_start:
+            base = min_emergency_start
+    try:
+        cal = CalendarAdapter()
+    except Exception:
+        cal = None
+    # Align to next quarter hour
+    start = _ceil_to_quarter_hour(base)
+    # If calendar disabled, just return aligned start
+    if not getattr(cal, "enabled", False):
+        return start
+    # Scan forward in 15-minute increments for an available slot
+    horizon_end = start + timedelta(hours=search_horizon_hours)
+    step = timedelta(minutes=15)
+    candidate = start
+    while candidate <= horizon_end:
+        if _is_slot_free_with_buffer(candidate, duration_minutes=duration_minutes, buffer_minutes=60, calendar=cal):
+            return candidate
+        candidate += step
+    # Fallback to start if nothing found
+    return start
+
 def _normalize_relative_datetime_phrases(text: str, now: datetime) -> str:
     norm = text
     # Normalize possessives like "today's", "tuesday's"
@@ -2460,38 +2665,16 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             if any(k in text_norm for k in ['emergency', 'urgent', 'immediately']):
                 # Immediate path: choose closest slot, do not book yet
                 try:
-                    calendar_adapter = CalendarAdapter()
+                    # Emergency path: at least 30 minutes from now, quarter-hour aligned, 1h buffer
                     now = datetime.now()
-                    suggested = now + timedelta(hours=1)
-                    if getattr(calendar_adapter, 'enabled', False):
-                        # Find nearest 2h slot with no events
-                        for i in range(0, 24):
-                            slot_start = now + timedelta(hours=i)
-                            slot_end = slot_start + timedelta(hours=2)
-                            events = calendar_adapter.get_events(start_date=slot_start, end_date=slot_end)
-                            if not events:
-                                suggested = slot_start
-                                break
-                    # Send location link immediately and hold this time
-                    # try:
-                    #     ok = await _send_magiclink_sms(call_sid)
-                    # except Exception:
-                    #     ok = False
-                    ok = True  # Skip SMS for now, just wait for "done"
-                    if ok:
-                        await add_tts_or_say_to_twiml(
-                            twiml,
-                            call_sid,
-                            f"Understood. The closest available slot is {_format_slot(suggested)}. Do you want this time? Please say YES or NO."
-                        )
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
-                    else:
-                        await add_tts_or_say_to_twiml(
-                            twiml,
-                            call_sid,
-                            f"Understood. The closest available slot is {_format_slot(suggested)}. Do you want this time? Please say YES or NO."
-                        )
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
+                    earliest = now + timedelta(minutes=30)
+                    suggested = find_next_compliant_slot(earliest, emergency=True)
+                    await add_tts_or_say_to_twiml(
+                        twiml,
+                        call_sid,
+                        f"Understood. The closest available slot is {_format_slot(suggested)}. Do you want this time? Please say YES or NO."
+                    )
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
                 except Exception as e:
                     logger.error(f"Emergency path suggestion failed: {e}")
                     await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
@@ -2512,63 +2695,25 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 preferred_time = gpt_infer_datetime_phrase(followup_text)
             if preferred_time:
                 try:
-                    start_time = preferred_time
-                    calendar_adapter = CalendarAdapter()
-                    events = []
-                    if getattr(calendar_adapter, 'enabled', False):
-                        end_time = preferred_time + timedelta(hours=2)
-                        events = calendar_adapter.get_events(start_date=start_time, end_date=end_time)
-                    if not events:
-                        # Hold time and send location link immediately
-                        # try:
-                        #     ok = await _send_magiclink_sms(call_sid)
-                        # except Exception:
-                        #     ok = False
-                        ok = True  # Skip SMS for now, just wait for "done"
-                        if ok:
-                            await add_tts_or_say_to_twiml(
-                                twiml,
-                                call_sid,
-                                f"Thanks. I can schedule you for {_format_slot(start_time)} for your {_speakable(job_type)}. Do you want this time? Please say YES or NO."
-                            )
-                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': start_time}
-                        else:
-                            await add_tts_or_say_to_twiml(
-                                twiml,
-                                call_sid,
-                                f"Thanks. I can schedule you for {_format_slot(start_time)} for your {_speakable(job_type)}. Do you want this time? Please say YES or NO."
-                            )
-                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': start_time}
+                    # Regular jobs: align to quarter-hour and respect 1h buffer
+                    requested = _ceil_to_quarter_hour(preferred_time)
+                    cal = CalendarAdapter()
+                    if _is_slot_free_with_buffer(requested, duration_minutes=120, buffer_minutes=60, calendar=cal):
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"Thanks. I can schedule you for {_format_slot(requested)} for your {_speakable(job_type)}. Do you want this time? Please say YES or NO."
+                        )
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': requested}
                     else:
-                        # Suggest next available, send location link
-                        next_available = start_time + timedelta(hours=2)
-                        if getattr(calendar_adapter, 'enabled', False):
-                            for i in range(1, 8):
-                                slot_start = start_time + timedelta(hours=2*i)
-                                slot_end = slot_start + timedelta(hours=2)
-                                slot_events = calendar_adapter.get_events(start_date=slot_start, end_date=slot_end)
-                                if not slot_events:
-                                    next_available = slot_start
-                                    break
-                        # try:
-                        #     ok = await _send_magiclink_sms(call_sid)
-                        # except Exception:
-                        #     ok = False
-                        ok = True  # Skip SMS for now, just wait for "done"
-                        if ok:
-                            await add_tts_or_say_to_twiml(
-                                twiml,
-                                call_sid,
-                                f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO."
-                            )
-                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
-                        else:
-                            await add_tts_or_say_to_twiml(
-                                twiml,
-                                call_sid,
-                                f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO."
-                            )
-                            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
+                        # Find the next compliant slot after the requested time
+                        next_available = find_next_compliant_slot(requested, emergency=False)
+                        await add_tts_or_say_to_twiml(
+                            twiml,
+                            call_sid,
+                            f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO."
+                        )
+                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
                 except Exception as e:
                     logger.error(f"Scheduling suggestion failed: {e}")
                     await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble checking availability right now. I can connect you to a human if you prefer.")
@@ -2590,27 +2735,13 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         try:
             calendar_adapter = CalendarAdapter()
             now = datetime.now()
-            suggested = now + timedelta(hours=1)
-            if getattr(calendar_adapter, 'enabled', False):
-                for i in range(0, 24):
-                    slot_start = now + timedelta(hours=i)
-                    slot_end = slot_start + timedelta(hours=2)
-                    events = calendar_adapter.get_events(start_date=slot_start, end_date=slot_end)
-                    if not events:
-                        suggested = slot_start
-                        break
-            # Send magiclink immediately and hold this time
-            # try:
-            #     ok = await _send_magiclink_sms(call_sid)
-            # except Exception:
-            #     ok = False
-            ok = True  # Skip SMS for now, just wait for "done"
-            if ok:
-                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Do you want this time? Please say YES or NO.")
-                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
-            else:
-                await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Do you want this time? Please say YES or NO.")
-                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
+            # Emergency: at least 30 minutes from now, quarter-hour aligned, 1h buffer from other jobs
+            earliest = now + timedelta(minutes=30)
+            suggested = find_next_compliant_slot(earliest, emergency=True)
+            # Send magiclink immediately and hold this time (skip actual SMS in flow for now)
+            ok = True
+            await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Do you want this time? Please say YES or NO.")
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
         except Exception as e:
             logger.error(f"Emergency slot suggestion failed: {e}")
             await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
@@ -2794,3 +2925,157 @@ async def perform_dispatch_transfer(call_sid: str) -> None:
         logger.info(f"📞 Initiated transfer for {call_sid} to dispatcher {number}")
     except Exception as e:
         logger.error(f"Failed to perform dispatch transfer for {call_sid}: {e}")
+
+# Escalation helpers for unclear intents
+
+def get_call_state(call_sid: str) -> dict:
+    st = call_info_store.setdefault(call_sid, {})
+    st.setdefault("unclear_intent_attempts", 0)
+    st.setdefault("handoff_requested", False)
+    st.setdefault("handoff_reason", None)
+    return st
+
+def mark_handoff(call_sid: str, reason: str) -> None:
+    st = get_call_state(call_sid)
+    st["handoff_requested"] = True
+    st["handoff_reason"] = reason
+    call_info_store[call_sid] = st
+
+def increment_unclear_attempts(call_sid: str) -> int:
+    st = get_call_state(call_sid)
+    st["unclear_intent_attempts"] = int(st.get("unclear_intent_attempts", 0)) + 1
+    call_info_store[call_sid] = st
+    return st["unclear_intent_attempts"]
+
+def reset_unclear_attempts(call_sid: str) -> None:
+    st = get_call_state(call_sid)
+    if st.get("unclear_intent_attempts"):
+        st["unclear_intent_attempts"] = 0
+        call_info_store[call_sid] = st
+
+async def ask_for_specifics(twiml: VoiceResponse, call_sid: str) -> None:
+    await add_tts_or_say_to_twiml(
+        twiml,
+        call_sid,
+        "Got it. What exactly do you need? For example: water heater repair, drain unclog, leak detection, toilet issue, or a new install."
+    )
+
+async def proceed_with_intent(call_sid: str, new_intent: dict, twiml: VoiceResponse) -> VoiceResponse:
+    # Reset attempts because we now have a clear path
+    reset_unclear_attempts(call_sid)
+    # Delegate to main handler with the clarified intent
+    return await handle_intent(call_sid, new_intent, None)
+
+async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: VoiceResponse) -> VoiceResponse:
+    # 1) If user explicitly asks for a human, route immediately.
+    if is_transfer_request(followup_text):
+        try:
+            await add_tts_or_say_to_twiml(twiml, call_sid, "Connecting you to our dispatcher now.")
+        except Exception:
+            pass
+        mark_handoff(call_sid, "user_requested_transfer")
+        await perform_dispatch_transfer(call_sid)
+        return twiml
+
+    # 1.5) Minimal safety/VIP triggers (fast path)
+    force, reason = should_force_transfer(followup_text, get_caller_e164(call_sid))
+    if force:
+        try:
+            await add_tts_or_say_to_twiml(twiml, call_sid, "I'll connect you to our dispatcher right now.")
+        except Exception:
+            pass
+        mark_handoff(call_sid, reason or "trigger_minimal")
+        await perform_dispatch_transfer(call_sid)
+        return twiml
+
+    # Debounce duplicates: don't count repeated unclear within short window
+    try:
+        info = call_info_store.get(call_sid, {})
+        last_norm = (info.get("last_followup_norm") or "").strip()
+        last_ts = float(info.get("last_followup_ts") or 0)
+        now_ts = time.time()
+        norm = " ".join((followup_text or "").lower().strip().split())
+        if last_norm == norm and (now_ts - last_ts) < 7.0:
+            logger.info(f"Debounced duplicate follow-up for {call_sid}: '{followup_text}'")
+            # Re-prompt gently but do not increment attempts
+            await ask_for_specifics(twiml, call_sid)
+            return twiml
+        info["last_followup_norm"] = norm
+        info["last_followup_ts"] = now_ts
+        call_info_store[call_sid] = info
+    except Exception:
+        pass
+
+    # 2) Try to extract intent again.
+    try:
+        from ops_integrations.flows.intents import extract_plumbing_intent  # type: ignore
+        new_intent = await extract_plumbing_intent(followup_text)
+    except Exception as e:
+        logger.error(f"Re-extract intent failed for {call_sid}: {e}")
+        new_intent = None
+
+    unclear = (not new_intent) or has_no_clear_service_intent(new_intent)
+
+    if unclear:
+        attempts = increment_unclear_attempts(call_sid)
+        if attempts >= MAX_UNCLEAR_ATTEMPTS:
+            try:
+                await add_tts_or_say_to_twiml(
+                    twiml,
+                    call_sid,
+                    "I'm still not catching the exact issue. I'll connect you to our dispatcher right now."
+                )
+            except Exception:
+                pass
+            mark_handoff(call_sid, "unclear_intent_twice")
+            await perform_dispatch_transfer(call_sid)
+            return twiml
+        else:
+            await ask_for_specifics(twiml, call_sid)
+            return twiml
+
+    # 3) Clear intent — continue normal booking flow
+    return await proceed_with_intent(call_sid, new_intent, twiml)
+
+# Minimal trigger evaluator (VIP/safety/abuse fast-path)
+import json as _json
+import re as _re
+
+TRIGGER_PATH = os.getenv("MINI_TRIGGER_JSON", os.path.join(os.path.dirname(__file__), "min_triggers.json"))
+_transfer_res = None
+_vip_set: set[str] = set()
+
+def _load_min_triggers() -> None:
+    global _transfer_res, _vip_set
+    try:
+        with open(TRIGGER_PATH, "r") as f:
+            cfg = _json.load(f)
+        _transfer_res = [_re.compile(p, _re.IGNORECASE) for p in cfg.get("transfer_patterns", [])]
+        _vip_set = set(cfg.get("vip_numbers_e164", []))
+        logger.info(f"Loaded minimal triggers from {TRIGGER_PATH} (patterns={len(_transfer_res)}, vip={len(_vip_set)})")
+    except Exception as e:
+        logger.warning(f"Minimal triggers not loaded from {TRIGGER_PATH}: {e}")
+        _transfer_res = []
+        _vip_set = set()
+
+def should_force_transfer(text: str, caller_e164: str | None) -> tuple[bool, str]:
+    global _transfer_res, _vip_set
+    if _transfer_res is None:
+        _load_min_triggers()
+    try:
+        if caller_e164 and caller_e164 in _vip_set:
+            return True, "vip_caller"
+        norm = " ".join(((text or "").lower()).strip().split())
+        for rx in _transfer_res or []:
+            if rx.search(norm):
+                return True, "safety_or_escalation_phrase"
+    except Exception:
+        pass
+    return False, ""
+
+def get_caller_e164(call_sid: str) -> str | None:
+    try:
+        num = (call_info_store.get(call_sid, {}) or {}).get("from")
+        return str(num) if num else None
+    except Exception:
+        return None

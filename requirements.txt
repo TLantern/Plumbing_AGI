@@ -12,6 +12,7 @@ requests-oauthlib>=1.3.0
 
 # SMS integration
 twilio==8.10.0
+clicksend-client>=5.0.0
 # AI integration
 openai>=1.0
 

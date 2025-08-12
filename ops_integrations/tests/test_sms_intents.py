@@ -10,9 +10,8 @@ from datetime import datetime
 sys.path.append('.')
 
 # Mock environment variables for testing
-os.environ['TWILIO_ACCOUNT_SID'] = 'test_sid'
-os.environ['TWILIO_AUTH_TOKEN'] = 'test_token'
-os.environ['TWILIO_FROM_NUMBER'] = '+1234567890'
+os.environ['CLICKSEND_USERNAME'] = 'test_user'
+os.environ['CLICKSEND_API_KEY'] = 'test_key'
 os.environ['OPENAI_API_KEY'] = 'test_key'  # You'll need to set this to your actual key
 
 def test_intent_loading():
@@ -68,7 +67,7 @@ def test_sms_adapter_initialization():
     try:
         from adapters.sms import SMSAdapter
         
-        # Create adapter (will show warnings about Twilio not being configured for real)
+        # Create adapter (will show warnings if ClickSend not configured for real)
         adapter = SMSAdapter()
         print(f"✅ SMS adapter created (enabled: {adapter.enabled})")
         
@@ -154,7 +153,7 @@ def main():
         print("🎉 All tests passed! The SMS intent classification system is properly configured.")
         print("\n📋 Next steps:")
         print("1. Set your OPENAI_API_KEY environment variable")
-        print("2. Configure Twilio credentials if you want to send real SMS")
+        print("2. Configure ClickSend credentials if you want to send real SMS")
         print("3. Test with actual OpenAI API calls")
     else:
         print("⚠️  Some tests failed. Please fix the issues above.")

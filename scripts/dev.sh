@@ -21,12 +21,24 @@ export ADMIN_API_KEY=${ADMIN_API_KEY:-opkey}
 export MAGICLINK_API_BASE=${MAGICLINK_API_BASE:-http://localhost:8000}
 export MAGICLINK_APP_URL=${MAGICLINK_APP_URL:-http://localhost:3000/location}
 export MAGICLINK_ADMIN_API_KEY=${MAGICLINK_ADMIN_API_KEY:-$ADMIN_API_KEY}
-# Optional Twilio SMS envs
+# ClickSend SMS envs
+export CLICKSEND_USERNAME=${CLICKSEND_USERNAME:-}
+export CLICKSEND_API_KEY=${CLICKSEND_API_KEY:-}
+export CLICKSEND_FROM_NUMBER=${CLICKSEND_FROM_NUMBER:-}
+export CLICKSEND_SOURCE=${CLICKSEND_SOURCE:-plumbing-agi}
+# Optional Twilio envs (voice/legacy)
 export TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
 export TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
 export TWILIO_SMS_FROM=${TWILIO_SMS_FROM:-}
 # Dispatcher phone number for human transfer
 export DISPATCH_NUMBER=${DISPATCH_NUMBER:-+14693096560}
+# SMTP (optional email fallback for location link)
+export SMTP_HOST=${SMTP_HOST:-}
+export SMTP_PORT=${SMTP_PORT:-587}
+export SMTP_USERNAME=${SMTP_USERNAME:-}
+export SMTP_PASSWORD=${SMTP_PASSWORD:-}
+export SMTP_FROM=${SMTP_FROM:-}
+export SMTP_USE_TLS=${SMTP_USE_TLS:-true}
 
 # Frontend public env
 export NEXT_PUBLIC_MAGICLINK_API_URL=${NEXT_PUBLIC_MAGICLINK_API_URL:-http://localhost:8000}

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Flask webhook server for handling incoming SMS messages from Twilio
+Flask webhook server for handling incoming SMS messages (ClickSend + Twilio form compatible)
 """
 from flask import Flask, request, jsonify
 import os
@@ -25,12 +25,12 @@ sms_adapter = SMSAdapter()
 @app.route('/webhook/sms', methods=['POST'])
 @app.route('/sms', methods=['POST'])
 def handle_incoming_sms():
-    """Handle incoming SMS webhook from Twilio."""
+    """Handle incoming SMS webhook from ClickSend (lowercase form) or Twilio (capitalized form)."""
     try:
-        # Get the incoming message data from Twilio
-        from_number = request.form.get('From')
-        to_number = request.form.get('To')
-        message_body = request.form.get('Body', '')
+        # Prefer ClickSend style (form keys: 'from', 'message'), fallback to Twilio ('From', 'Body')
+        from_number = request.form.get('from') or request.form.get('From')
+        to_number = request.form.get('originalsenderid') or request.form.get('To')
+        message_body = request.form.get('message') or request.form.get('Body', '')
         
         logger.info(f"📨 Incoming SMS from {from_number} to {to_number}: {message_body}")
         
@@ -39,7 +39,6 @@ def handle_incoming_sms():
         
         logger.info(f"📤 Response result: {result}")
         
-        # Return a TwiML response (optional - Twilio will still send the SMS)
         return jsonify({
             "success": True,
             "message": "SMS processed successfully",
@@ -67,7 +66,7 @@ def home():
     """Home page with instructions."""
     return """
     <h1>🚰 Plumbing AGI SMS Webhook Server</h1>
-    <p>This server handles incoming SMS messages from Twilio.</p>
+    <p>This server handles incoming SMS messages from ClickSend (and Twilio fallback).</p>
     <h2>Endpoints:</h2>
     <ul>
         <li><strong>POST /webhook/sms</strong> - Handle incoming SMS messages (primary)</li>
@@ -77,8 +76,8 @@ def home():
     <h2>Setup Instructions:</h2>
     <ol>
         <li>Make this server publicly accessible (ngrok, etc.)</li>
-        <li>Set the webhook URL in Twilio Console</li>
-        <li>Send SMS to your Twilio number to test</li>
+        <li>Set the inbound SMS webhook in ClickSend Portal (or Twilio Console for legacy)</li>
+        <li>Send SMS to your ClickSend number to test</li>
     </ol>
     <p><strong>Current Status:</strong> SMS Adapter Enabled: {}</p>
     <p><strong>From Number:</strong> {}</p>

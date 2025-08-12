@@ -14,59 +14,68 @@ from prompts.prompt_layer import (
 # Load environment variables
 load_dotenv()
 
-# Try to import Twilio, but don't fail if it's not available
+# Try to import ClickSend, but don't fail if it's not available
 try:
-    from twilio.rest import Client
-    from twilio.base.exceptions import TwilioException
-    TWILIO_AVAILABLE = True
+    import clicksend_client  # type: ignore
+    from clicksend_client import SmsMessage, SmsMessageCollection  # type: ignore
+    from clicksend_client.rest import ApiException as ClickSendApiException  # type: ignore
+    CLICKSEND_AVAILABLE = True
 except ImportError:
-    TWILIO_AVAILABLE = False
-    logging.warning("Twilio not installed. Run: pip install twilio")
+    CLICKSEND_AVAILABLE = False
+    logging.warning("ClickSend not installed. Run: pip install clicksend-client")
 
 class SMSAdapter:
     def __init__(self):
-        self.account_sid = os.getenv('TWILIO_ACCOUNT_SID')
-        self.auth_token = os.getenv('TWILIO_AUTH_TOKEN')
-        self.from_number = os.getenv('TWILIO_FROM_NUMBER')
-        # Ensure proper format for Twilio number
+        # ClickSend configuration
+        self.cs_username = os.getenv('CLICKSEND_USERNAME')
+        self.cs_api_key = os.getenv('CLICKSEND_API_KEY')
+        self.from_number = os.getenv('CLICKSEND_FROM_NUMBER')
+        self.cs_source = os.getenv('CLICKSEND_SOURCE', 'plumbing-agi')
+        # Ensure proper format for E.164 number if provided
         if self.from_number and not self.from_number.startswith('+'):
             self.from_number = '+1' + self.from_number
         
         # OpenAI configuration
         openai.api_key = os.getenv('OPENAI_API_KEY')
         
-        if not all([self.account_sid, self.auth_token, self.from_number]):
-            logging.warning("Twilio not configured - missing environment variables")
+        # Enable only if ClickSend is available and credentials are present
+        if not CLICKSEND_AVAILABLE or not self.cs_username or not self.cs_api_key:
+            logging.warning("ClickSend SMS not configured - missing environment variables or library")
             self.enabled = False
+            self.cs_api = None
         else:
             self.enabled = True
-            if TWILIO_AVAILABLE:
-                self.client = Client(self.account_sid, self.auth_token)
-            else:
-                self.enabled = False
-                logging.error("Twilio library not available")
+            configuration = clicksend_client.Configuration()  # type: ignore
+            configuration.username = self.cs_username  # type: ignore[attr-defined]
+            configuration.password = self.cs_api_key  # type: ignore[attr-defined]
+            self.cs_api = clicksend_client.SMSApi(clicksend_client.ApiClient(configuration))  # type: ignore
 
     def send_sms(self, to_number: str, message: str) -> Dict[str, Any]:
-        """Send SMS message using Twilio."""
-        if not self.enabled:
+        """Send SMS message using ClickSend."""
+        if not self.enabled or self.cs_api is None:
             return {"success": False, "error": "SMS not configured"}
         
         try:
-            message = self.client.messages.create(
+            sms_message = SmsMessage(  # type: ignore
+                source=self.cs_source,
                 body=message,
-                from_=self.from_number,
-                to=to_number
+                to=to_number,
             )
-            
-            logging.info(f"✅ SMS sent successfully to {to_number}: {message.sid}")
+            # Some accounts may be configured with a default sender ID; we skip setting 'from' explicitly
+            payload = SmsMessageCollection(messages=[sms_message])  # type: ignore
+            api_response = self.cs_api.sms_send_post(payload)  # type: ignore
+            response_str = str(api_response)
+            logging.info(f"✅ SMS sent request to {to_number} via ClickSend")
             return {
                 "success": True,
-                "message_sid": message.sid,
-                "status": message.status,
-                "to": to_number
+                "raw_response": response_str,
+                "to": to_number,
             }
             
-        except TwilioException as e:
+        except ClickSendApiException as e:  # type: ignore
+            logging.error(f"❌ ClickSend API error: {e}")
+            return {"success": False, "error": str(e)}
+        except Exception as e:
             logging.error(f"❌ SMS send failed: {e}")
             return {"success": False, "error": str(e)}
 
