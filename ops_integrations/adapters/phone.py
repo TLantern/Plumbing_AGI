@@ -92,8 +92,9 @@ class Settings(BaseSettings):
     FORCE_SAY_ONLY: bool = False  # Diagnostics: avoid TTS and use <Say>
     # OpenAI TTS Configuration
     OPENAI_TTS_SPEED: float = 1.25  # Increased from 1.0 for faster responses (0.25 to 4.0)
+    SPEECH_GATE_BUFFER_SEC: float = 1.0  # Buffer time added to TTS duration for speech gate
     # Confidence Thresholds
-    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -1.0  # Minimum avg_logprob for accepting transcription (-1.0 = normal, -0.5 = stricter)
+    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -0.8  # Minimum avg_logprob for accepting transcription (-1.0 = normal, -0.5 = stricter)
     INTENT_CONFIDENCE_THRESHOLD: float = 0.4  # Minimum confidence for intent matching (0.0-1.0)
     OVERALL_CONFIDENCE_THRESHOLD: float = 0.5  # Minimum overall confidence before human handoff (0.0-1.0)
     CONFIDENCE_DEBUG_MODE: bool = True  # Enable detailed confidence logging
@@ -114,9 +115,9 @@ settings = Settings()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Use whisper-1 (standard) or consider whisper-large-v3 for better accuracy vs speed trade-off
-TRANSCRIPTION_MODEL = "whisper-large-v3"
+TRANSCRIPTION_MODEL = "whisper-1"
 # Enable faster transcription processing with shorter prompts
-FAST_TRANSCRIPTION_PROMPT = "Caller describing plumbing issue. Ignore background noise, dial tones, and hangup signals."
+FAST_TRANSCRIPTION_PROMPT = "Caller describing plumbing issue. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Focus only on human speech."
 
 # VAD Configuration
 VAD_AGGRESSIVENESS = 3  # 0-3, higher = more aggressive filtering
@@ -125,7 +126,7 @@ SILENCE_TIMEOUT_SEC = 1.5  # Allow longer pauses to prevent cutoffs mid-sentence
 MIN_SPEECH_DURATION_SEC = 0.3  # Reduced from 0.5s - accept shorter utterances
 CHUNK_DURATION_SEC = 2.0  # Reduced from 3s - faster fallback processing
 PREROLL_IGNORE_SEC = 0.4  # Reduced from 0.7s - respond to speech sooner
-MIN_START_RMS = 100  # Reduced from 120 - more sensitive to quiet speech
+MIN_START_RMS = 130  # Reduced from 120 - more sensitive to quiet speech
 FAST_RESPONSE_MODE = True  # New: Enable optimizations for speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
@@ -144,6 +145,9 @@ vad_states = defaultdict(lambda: {
     'last_chunk_time': 0,
     'has_received_media': False,
     'last_listen_log_time': 0.0,
+    'bot_speaking': False,  # NEW: Track when bot is outputting TTS
+    'bot_speech_start_time': 0,  # NEW: When bot started speaking
+    'speech_gate_active': False,  # NEW: Gate to block user speech processing
 })
 
 # Per-call media format (encoding and sample rate)
@@ -394,6 +398,12 @@ async def classify_transcript_intent(text: str) -> tuple[str, float]:
             logger.debug(f"Unknown intent returned: {intent}, falling back to GENERAL_INQUIRY")
             intent = "GENERAL_INQUIRY"
         
+        # Special handling for booking requests - boost confidence
+        if intent == "BOOKING_REQUEST":
+            # Booking requests should have high confidence when pattern matched
+            final_confidence = max(final_confidence, 0.8)
+            logger.info(f"🎯 Booking request detected with confidence {final_confidence:.3f}")
+        
         # Calculate final confidence by combining pattern matching and GPT confidence
         pattern_conf = pattern_confidence.get(intent, 0.0)
         gpt_confidence = min(1.0, len(text.split()) / 10.0)  # Basic GPT confidence heuristic
@@ -410,6 +420,8 @@ async def classify_transcript_intent(text: str) -> tuple[str, float]:
             logger.info(f"🎯 Intent classification: '{intent}' with confidence {final_confidence:.3f}")
             logger.info(f"🔍 Pattern confidence: {pattern_confidence}")
             logger.info(f"🔍 GPT confidence: {gpt_confidence:.3f}")
+            # Log the specific text being classified for debugging
+            logger.info(f"📝 Text being classified: '{text}'")
         
         return intent, final_confidence
             
@@ -478,19 +490,45 @@ def calculate_pattern_matching_confidence(text: str, intents_data: dict) -> dict
         for pattern in patterns:
             pattern_lower = pattern.lower()
             
-            # Exact phrase match
+            # Exact phrase match (highest confidence)
             if pattern_lower in text_lower:
-                max_confidence = max(max_confidence, 0.9)
+                max_confidence = max(max_confidence, 0.95)
+                logger.debug(f"🎯 Exact pattern match: '{pattern_lower}' in '{text_lower}' -> 0.95 confidence")
                 continue
             
-            # Word overlap scoring
+            # Partial phrase match (high confidence)
+            if len(pattern_lower) > 3 and any(word in text_lower for word in pattern_lower.split()):
+                # Check if key words from pattern are present
+                pattern_words = pattern_lower.split()
+                key_words = [w for w in pattern_words if len(w) > 2]  # Skip short words like "a", "an", "to"
+                if key_words:
+                    matches = sum(1 for word in key_words if word in text_lower)
+                    if matches >= len(key_words) * 0.7:  # 70% of key words match
+                        partial_confidence = 0.85
+                        max_confidence = max(max_confidence, partial_confidence)
+                        logger.debug(f"🎯 Partial pattern match: {matches}/{len(key_words)} key words from '{pattern_lower}' in '{text_lower}' -> {partial_confidence} confidence")
+                        continue
+            
+            # Word overlap scoring (medium confidence)
             pattern_words = set(pattern_lower.split())
             text_words = set(text_lower.split())
             overlap = len(pattern_words.intersection(text_words))
             
             if overlap > 0:
                 word_confidence = overlap / len(pattern_words)
-                max_confidence = max(max_confidence, word_confidence * 0.7)
+                overlap_confidence = word_confidence * 0.75
+                max_confidence = max(max_confidence, overlap_confidence)
+                logger.debug(f"🎯 Word overlap: {overlap}/{len(pattern_words)} words from '{pattern_lower}' in '{text_lower}' -> {overlap_confidence} confidence")
+        
+        # Special handling for booking-related keywords
+        if intent_tag == "BOOKING_REQUEST":
+            booking_keywords = ["book", "schedule", "appointment", "booking", "prefer to book", "want to book", "need to book"]
+            for keyword in booking_keywords:
+                if keyword in text_lower:
+                    booking_confidence = 0.9
+                    max_confidence = max(max_confidence, booking_confidence)
+                    logger.debug(f"🎯 Booking keyword match: '{keyword}' in '{text_lower}' -> {booking_confidence} confidence")
+                    break
         
         # Try semantic similarity if available
         if max_confidence < 0.5:
@@ -918,6 +956,7 @@ async def _send_booking_to_operator(call_sid: str, intent: dict, suggested_time:
         customer = intent.get('customer', {})
         job = intent.get('job', {})
         location = intent.get('location', {})
+        customer_phone = customer.get('phone') or call_info.get('from', '')
         
         # Normalize job payload to match frontend expectation
         appt_iso = suggested_time.isoformat()
@@ -1208,6 +1247,10 @@ class ConnectionManager:
             # Clean up consecutive failure tracking
             consecutive_intent_failures.pop(call_sid, None)
             consecutive_overall_failures.pop(call_sid, None)
+            # Clean up speech gate state
+            if call_sid in vad_states:
+                vad_states[call_sid]['speech_gate_active'] = False
+                vad_states[call_sid]['bot_speaking'] = False
             logger.debug(f"Cleaned up resources for CallSid={call_sid}")
 
     async def receive_loop(self, call_sid: str):
@@ -1455,6 +1498,16 @@ async def process_audio(call_sid: str, audio: bytes):
     sample_rate = audio_config_store.get(call_sid, {}).get('sample_rate', SAMPLE_RATE_DEFAULT)
     stream_start_time = vad_state.get('stream_start_time', current_time)
     
+    # Check if bot is currently speaking (speech gate)
+    if vad_state.get('speech_gate_active', False):
+        # Bot is speaking - suppress user speech processing but still log
+        gate_start_time = vad_state.get('bot_speech_start_time', current_time)
+        gate_elapsed = current_time - gate_start_time
+        logger.debug(f"🔇 Speech gate active for {call_sid} - suppressing user speech processing (elapsed: {gate_elapsed:.2f}s)")
+        # Still add to buffer to maintain continuity when gate is lifted
+        audio_buffers[call_sid].extend(audio)
+        return
+    
     # Log incoming audio
     logger.debug(f"📡 Received {len(audio)} bytes of PCM16 audio from {call_sid}")
     
@@ -1650,7 +1703,7 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             pass
         
         # Use shorter prompt in fast mode for quicker processing
-        prompt = FAST_TRANSCRIPTION_PROMPT if FAST_RESPONSE_MODE else "Caller is describing a plumbing issue or asking a question. Ignore background noise, dial tones, and hangup signals."
+        prompt = FAST_TRANSCRIPTION_PROMPT if FAST_RESPONSE_MODE else "Caller is describing a plumbing issue or asking a question. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Focus only on human speech."
         
         resp = client.audio.transcriptions.create(
             model=TRANSCRIPTION_MODEL,
@@ -1664,6 +1717,15 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
         logger.info(f"Whisper transcription completed for {call_sid} in {transcription_duration:.2f}s")
         
         text = (resp.text or "").strip()
+        
+        # Clean and filter transcription for unwanted content and repetitions
+        cleaned_text, should_suppress_due_to_content = clean_and_filter_transcription(text)
+        if should_suppress_due_to_content:
+            return
+        
+        # Use cleaned text for further processing
+        text = cleaned_text
+        
         # Confidence/quality gating using segments avg_logprob
         avg_logprobs = []
         for seg in getattr(resp, 'segments', []) or []:
@@ -1780,6 +1842,74 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
         append_stream_and_pause_local(twiml)
         await push_twiml_to_call(call_sid, twiml)
         return
+
+    # Transfer confirmation handling
+    if dialog and dialog.get('step') == 'awaiting_transfer_confirm':
+        if is_affirmative_response(text):
+            # User said yes - transfer to dispatch
+            twiml = VoiceResponse()
+            await add_tts_or_say_to_twiml(twiml, call_sid, "Connecting you to our dispatch team now.")
+            twiml.dial(settings.DISPATCH_NUMBER)
+            # Mark state to avoid further processing
+            st = call_info_store.setdefault(call_sid, {})
+            st["handoff_requested"] = True
+            st["handoff_reason"] = "user_confirmed_transfer_after_unclear_attempts"
+            call_info_store[call_sid] = st
+            # Clear dialog state
+            call_dialog_state.pop(call_sid, None)
+            await push_twiml_to_call(call_sid, twiml)
+            logger.info(f"📞 User confirmed transfer for {call_sid} after unclear attempts")
+            return
+        elif is_negative_response(text):
+            # User said no - continue with clarification
+            twiml = VoiceResponse()
+            await add_tts_or_say_to_twiml(
+                twiml, 
+                call_sid, 
+                "No problem. Let me try to help you differently. What exactly do you need? For example: water heater repair, drain unclog, leak detection, toilet issue, or a new install."
+            )
+            # Clear dialog state and reset unclear attempts to give them another chance
+            call_dialog_state.pop(call_sid, None)
+            reset_unclear_attempts(call_sid)
+            # Resume streaming to listen for their response
+            start = Start()
+            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
+            if ws_base:
+                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            else:
+                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                else:
+                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            start.stream(url=wss_url, track="inbound_track")
+            twiml.append(start)
+            twiml.pause(length=3600)
+            await push_twiml_to_call(call_sid, twiml)
+            logger.info(f"💬 User declined transfer for {call_sid}, continuing with clarification")
+            return
+        else:
+            # Unclear response to transfer confirmation - ask again more directly
+            twiml = VoiceResponse()
+            await add_tts_or_say_to_twiml(twiml, call_sid, "I didn't catch that. Should I transfer you to a representative? Please say yes or no.")
+            # Keep the same dialog state
+            start = Start()
+            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
+            if ws_base:
+                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            else:
+                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                else:
+                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            start.stream(url=wss_url, track="inbound_track")
+            twiml.append(start)
+            twiml.pause(length=3600)
+            await push_twiml_to_call(call_sid, twiml)
+            return
 
     # Scheduling/path and confirmation follow-up handling
     if dialog and dialog.get('step') in (
@@ -1991,9 +2121,62 @@ async def synthesize_tts(text: str) -> Optional[bytes]:
         logger.error(f"OpenAI TTS failed: {e}")
         return None
 
+async def _activate_speech_gate(call_sid: str, text: str):
+    """Activate speech gate to prevent user speech processing during bot TTS output"""
+    try:
+        vad_state = vad_states[call_sid]
+        current_time = time.time()
+        
+        # Estimate TTS duration based on text length and speed
+        # Rough estimate: ~150 words per minute at normal speed, adjusted by TTS speed
+        word_count = len(text.split())
+        base_duration = (word_count / 150) * 60  # Base duration in seconds
+        actual_duration = base_duration / settings.OPENAI_TTS_SPEED  # Adjust for speed
+        
+        # Add buffer time for network latency and processing
+        buffer_time = settings.SPEECH_GATE_BUFFER_SEC
+        gate_duration = actual_duration + buffer_time
+        
+        # Activate the speech gate
+        vad_state['speech_gate_active'] = True
+        vad_state['bot_speaking'] = True
+        vad_state['bot_speech_start_time'] = current_time
+        
+        logger.info(f"🔇 Speech gate activated for {call_sid}: {gate_duration:.2f}s (text: {len(text)} chars)")
+        
+        # Schedule gate deactivation
+        asyncio.create_task(_deactivate_speech_gate_after_delay(call_sid, gate_duration))
+        
+    except Exception as e:
+        logger.error(f"Failed to activate speech gate for {call_sid}: {e}")
+
+async def _deactivate_speech_gate_after_delay(call_sid: str, delay: float):
+    """Deactivate speech gate after estimated TTS completion"""
+    try:
+        await asyncio.sleep(delay)
+        
+        vad_state = vad_states.get(call_sid)
+        if vad_state:
+            vad_state['speech_gate_active'] = False
+            vad_state['bot_speaking'] = False
+            logger.info(f"🔊 Speech gate deactivated for {call_sid} after {delay:.2f}s")
+            
+            # Clear any accumulated audio during gate period to avoid processing stale audio
+            if vad_state.get('is_speaking'):
+                vad_state['is_speaking'] = False
+                vad_state['pending_audio'] = bytearray()
+                logger.debug(f"Cleared pending audio for {call_sid} after speech gate")
+                
+    except Exception as e:
+        logger.error(f"Failed to deactivate speech gate for {call_sid}: {e}")
+
 async def add_tts_or_say_to_twiml(target, call_sid: str, text: str):
     speak_text = text.replace("_", " ")
     preview = speak_text if len(speak_text) <= 200 else speak_text[:200] + "..."
+    
+    # Activate speech gate when bot starts speaking
+    await _activate_speech_gate(call_sid, speak_text)
+    
     if settings.FORCE_SAY_ONLY:
         logger.info(f"🗣️ OpenAI TTS SAY for CallSid={call_sid}: {preview}")
         target.say(speak_text)
@@ -2091,31 +2274,17 @@ def calculate_confidence_scores(args: dict, original_text: str, intent_confidenc
     # Job type confidence
     job_type = args.get('job', {}).get('type')
     if job_type:
-        confidence["fields"]["type"] = 0.9 if job_type in ['leak', 'water_heater', 'clog', 'gas_line', 'sewer_cam'] else 0.7
+        confidence["fields"]["type"] = 0.9 if job_type in ['leak', 'water_heater', 'clog', 'gas_line', 'sewer_cam', 'plumbing', 'drain_cleaning', 'plumbing_repair', 'plumbing_installation', 'plumbing_replacement', 'plumbing_maintenance', 'plumbing_inspection', 'plumbing_repair', 'plumbing_installation', 'plumbing_replacement', 'plumbing_maintenance', 'plumbing_inspection'] else 0.7
     else:
         confidence["fields"]["type"] = 0.0
     
     # Urgency confidence
     urgency = args.get('job', {}).get('urgency')
     if urgency:
-        confidence["fields"]["urgency"] = 0.8 if urgency in ['emergency', 'same_day', 'flex'] else 0.5
+        confidence["fields"]["urgency"] = 0.8 if urgency in ['emergency', 'same_day', 'flex', 'as soon as possible', 'urgent', 'immediately', 'today', 'soon', 'quickly', 'right now'] else 0.5
     else:
         confidence["fields"]["urgency"] = 0.0
-    
-    # Address confidence
-    address = args.get('location', {}).get('raw_address')
-    if address:
-        confidence["fields"]["address"] = 0.8
-    else:
-        confidence["fields"]["address"] = 0.0
-    
-    # Customer name confidence
-    customer_name = args.get('customer', {}).get('name')
-    if customer_name:
-        confidence["fields"]["customer"] = 0.9
-    else:
-        confidence["fields"]["customer"] = 0.0
-    
+       
     # Overall confidence (include intent confidence in calculation)
     field_scores = list(confidence["fields"].values())
     field_scores.append(intent_confidence)  # Include intent confidence
@@ -3255,6 +3424,69 @@ async def proceed_with_intent(call_sid: str, new_intent: dict, twiml: VoiceRespo
     return await handle_intent(call_sid, new_intent, None)
 
 async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: VoiceResponse) -> VoiceResponse:
+    # 0) Handle transfer confirmation responses universally (regardless of conversation stage)
+    dialog = call_dialog_state.get(call_sid, {})
+    if dialog.get('step') == 'awaiting_transfer_confirm':
+        if is_affirmative_response(followup_text):
+            # User said yes - transfer to dispatch
+            await add_tts_or_say_to_twiml(twiml, call_sid, "Connecting you to our dispatch team now.")
+            twiml.dial(settings.DISPATCH_NUMBER)
+            # Mark state to avoid further processing
+            st = call_info_store.setdefault(call_sid, {})
+            st["handoff_requested"] = True
+            st["handoff_reason"] = "user_confirmed_transfer_after_unclear_attempts"
+            call_info_store[call_sid] = st
+            # Clear dialog state
+            call_dialog_state.pop(call_sid, None)
+            logger.info(f"📞 User confirmed transfer for {call_sid} after unclear attempts")
+            return twiml
+        elif is_negative_response(followup_text):
+            # User said no - continue with clarification
+            await add_tts_or_say_to_twiml(
+                twiml, 
+                call_sid, 
+                "No problem. Let me try to help you differently. What exactly do you need? For example: water heater repair, drain unclog, leak detection, toilet issue, or a new install."
+            )
+            # Clear dialog state and reset unclear attempts to give them another chance
+            call_dialog_state.pop(call_sid, None)
+            reset_unclear_attempts(call_sid)
+            # Resume streaming to listen for their response
+            start = Start()
+            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
+            if ws_base:
+                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            else:
+                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                else:
+                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            start.stream(url=wss_url, track="inbound_track")
+            twiml.append(start)
+            twiml.pause(length=3600)
+            logger.info(f"💬 User declined transfer for {call_sid}, continuing with clarification")
+            return twiml
+        else:
+            # Unclear response to transfer confirmation - ask again more directly
+            await add_tts_or_say_to_twiml(twiml, call_sid, "I didn't catch that. Should I transfer you to a representative? Please say yes or no.")
+            # Keep the same dialog state and resume streaming
+            start = Start()
+            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
+            if ws_base:
+                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            else:
+                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
+                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                else:
+                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            start.stream(url=wss_url, track="inbound_track")
+            twiml.append(start)
+            twiml.pause(length=3600)
+            return twiml
+
     # 1) If user explicitly asks for a human, route immediately.
     if is_transfer_request(followup_text):
         try:
@@ -3307,16 +3539,32 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
     if unclear:
         attempts = increment_unclear_attempts(call_sid)
         if attempts >= MAX_UNCLEAR_ATTEMPTS:
+            # On the third attempt, ask for transfer confirmation instead of immediately transferring
             try:
                 await add_tts_or_say_to_twiml(
                     twiml,
                     call_sid,
-                    "I'm still not catching the exact issue. I'll connect you to our dispatcher right now."
+                    "Sorry, I'm having trouble understanding your request. Would you like me to transfer you to a representative on our team?"
                 )
+                # Set dialog state to await transfer confirmation
+                call_dialog_state[call_sid] = {'step': 'awaiting_transfer_confirm'}
+                # Resume streaming to listen for yes/no response
+                start = Start()
+                ws_base = call_info_store.get(call_sid, {}).get('ws_base')
+                if ws_base:
+                    wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+                else:
+                    if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
+                        wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                    elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
+                        wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                    else:
+                        wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+                start.stream(url=wss_url, track="inbound_track")
+                twiml.append(start)
+                twiml.pause(length=3600)
             except Exception:
                 pass
-            mark_handoff(call_sid, "unclear_intent_twice")
-            await perform_dispatch_transfer(call_sid)
             return twiml
         else:
             await ask_for_specifics(twiml, call_sid)
@@ -3367,3 +3615,596 @@ def get_caller_e164(call_sid: str) -> str | None:
         return str(num) if num else None
     except Exception:
         return None
+
+# Add new function before the existing suppression logic
+def clean_and_filter_transcription(text: str) -> tuple[str, bool]:
+    """
+    Clean transcription text by removing unwanted patterns and repeated phrases.
+    
+    Returns:
+        tuple: (cleaned_text, should_suppress_entirely)
+    """
+    if not text:
+        return "", True
+    
+    # Original text for logging
+    original_text = text
+    
+    # Convert to lowercase for pattern matching
+    text_lower = text.lower()
+    
+    # Patterns to completely suppress the entire transcription
+    suppression_patterns = [
+        # FEMA references
+        r'for more information,?\s*visit\s*www\.fema\.gov',
+        r'visit\s*www\.fema\.gov',
+        r'fema\.gov',
+        r'federal emergency management agency',
+        # Common transcription artifacts
+        r'thank you for watching',
+        r'subscribe.*channel',
+        r'like.*comment',
+        r'video.*description',
+        r'pissedconsumer',
+        # Sound/noise words that should be suppressed
+        r'\bbeep\b',
+        r'\bboop\b',
+        r'\bclick\b',
+        r'\bclunk\b',
+        r'\bwhir\b',
+        r'\bwhirr\b',
+        r'\bwhistle\b',
+        r'\bchime\b',
+        r'\bding\b',
+        r'\bdong\b',
+        r'\bbuzz\b',
+        r'\bhum\b',
+        r'\bstatic\b',
+        r'\bnoise\b',
+        r'\bbackground noise\b',
+        r'\bdial tone\b',
+        r'\bhangup signal\b',
+        r'\bhang up signal\b',
+        r'\bdisconnect tone\b',
+        r'\bbusy signal\b',
+        r'\bhold music\b',
+        r'\bhold tone\b',
+        r'\bwaiting tone\b',
+        r'\bconnection sound\b',
+        r'\bphone sound\b',
+        r'\btelephone sound\b',
+        r'\bline noise\b',
+        r'\binterference\b',
+        r'\bdistortion\b',
+        r'\bfeedback\b',
+        r'\becho\b',
+        r'\bdelay\b',
+        r'\blatency\b',
+        r'\bdead air\b',
+        r'\bsilence\b',
+        r'\bquiet\b',
+        r'\bwhite noise\b',
+        r'\bpink noise\b',
+        r'\bbrown noise\b',
+        r'\bambient noise\b',
+        r'\broom tone\b',
+        r'\bair conditioning\b',
+        r'\bventilation\b',
+        r'\bfan noise\b',
+        r'\bengine noise\b',
+        r'\btraffic noise\b',
+        r'\bconstruction noise\b',
+        r'\bconversation noise\b',
+        r'\bcrowd noise\b',
+        r'\bbackground conversation\b',
+        r'\bbackground music\b',
+        r'\bbackground tv\b',
+        r'\bbackground radio\b',
+        r'\bbackground audio\b',
+        r'\bbackground sound\b',
+        r'\bbackground voice\b',
+        r'\bbackground speech\b',
+        r'\bbackground talking\b',
+        r'\bbackground chatter\b',
+        r'\bbackground murmur\b',
+        r'\bbackground hum\b',
+        r'\bbackground drone\b',
+        r'\bbackground rumble\b',
+        r'\bbackground roar\b',
+        r'\bbackground hiss\b',
+        r'\bbackground crackle\b',
+        r'\bbackground pop\b',
+        r'\bbackground snap\b',
+        r'\bbackground crack\b',
+        r'\bbackground thud\b',
+        r'\bbackground thump\b',
+        r'\bbackground bang\b',
+        r'\bbackground crash\b',
+        r'\bbackground slam\b',
+        r'\bbackground knock\b',
+        r'\bbackground tap\b',
+        r'\bbackground tick\b',
+        r'\bbackground tock\b',
+        r'\bbackground tick tock\b',
+        r'\bbackground clock\b',
+        r'\bbackground alarm\b',
+        r'\bbackground ring\b',
+        r'\bbackground ringtone\b',
+        r'\bbackground notification\b',
+        r'\bbackground alert\b',
+        r'\bbackground warning\b',
+        r'\bbackground error\b',
+        r'\bbackground system\b',
+        r'\bbackground computer\b',
+        r'\bbackground device\b',
+        r'\bbackground machine\b',
+        r'\bbackground equipment\b',
+        r'\bbackground appliance\b',
+        r'\bbackground tool\b',
+        r'\bbackground instrument\b',
+        r'\bbackground apparatus\b',
+        r'\bbackground mechanism\b',
+        r'\bbackground contraption\b',
+        r'\bbackground gadget\b',
+        r'\bbackground gizmo\b',
+        r'\bbackground widget\b',
+        r'\bbackground thingamajig\b',
+        r'\bbackground whatchamacallit\b',
+        r'\bbackground doohickey\b',
+        r'\bbackground doodad\b',
+        r'\bbackground thingy\b',
+        r'\bbackground thing\b',
+        r'\bbackground object\b',
+        r'\bbackground item\b',
+        r'\bbackground piece\b',
+        r'\bbackground part\b',
+        r'\bbackground component\b',
+        r'\bbackground element\b',
+        r'\bbackground factor\b',
+        r'\bbackground aspect\b',
+        r'\bbackground feature\b',
+        r'\bbackground characteristic\b',
+        r'\bbackground property\b',
+        r'\bbackground attribute\b',
+        r'\bbackground quality\b',
+        r'\bbackground trait\b',
+        r'\bbackground mark\b',
+        r'\bbackground sign\b',
+        r'\bbackground indicator\b',
+        r'\bbackground signal\b',
+        r'\bbackground cue\b',
+        r'\bbackground hint\b',
+        r'\bbackground clue\b',
+        r'\bbackground evidence\b',
+        r'\bbackground proof\b',
+        r'\bbackground trace\b',
+        r'\bbackground remnant\b',
+        r'\bbackground residue\b',
+        r'\bbackground leftover\b',
+        r'\bbackground remainder\b',
+        r'\bbackground excess\b',
+        r'\bbackground surplus\b',
+        r'\bbackground extra\b',
+        r'\bbackground additional\b',
+        r'\bbackground supplementary\b',
+        r'\bbackground complementary\b',
+        r'\bbackground auxiliary\b',
+        r'\bbackground secondary\b',
+        r'\bbackground tertiary\b',
+        r'\bbackground quaternary\b',
+        r'\bbackground quinary\b',
+        r'\bbackground senary\b',
+        r'\bbackground septenary\b',
+        r'\bbackground octonary\b',
+        r'\bbackground nonary\b',
+        r'\bbackground denary\b',
+        r'\bbackground undenary\b',
+        r'\bbackground duodenary\b',
+        r'\bbackground tredenary\b',
+        r'\bbackground quattuordenary\b',
+        r'\bbackground quindenary\b',
+        r'\bbackground sexdenary\b',
+        r'\bbackground septendenary\b',
+        r'\bbackground octodenary\b',
+        r'\bbackground novemdenary\b',
+        r'\bbackground vigintenary\b',
+        # URLs and domains
+        r'https?://[^\s]+',
+        r'www\.[^\s]+',
+        r'\b[a-z0-9-]+\.[a-z]{2,6}\b',
+    ]
+    
+    # Check if we should suppress the entire transcription
+    for pattern in suppression_patterns:
+        if re.search(pattern, text_lower):
+            logger.info(f"🚫 Suppressing transcription due to pattern '{pattern}': '{original_text}'")
+            return "", True
+    
+    # Clean text by removing unwanted content but keep the rest
+    cleaned_text = text
+    
+    # Remove specific phrases (case-insensitive)
+    removal_patterns = [
+        r'for more information,?\s*visit\s*www\.fema\.gov',
+        r'visit\s*www\.fema\.gov',
+        r'fema\.gov',
+        r'thank you for watching',
+        r'subscribe to.*channel',
+        r'like and comment',
+        r'check the description',
+        # Sound/noise words to remove but keep the rest of the text
+        r'\bbeep\b',
+        r'\bboop\b',
+        r'\bclick\b',
+        r'\bclunk\b',
+        r'\bwhir\b',
+        r'\bwhirr\b',
+        r'\bwhistle\b',
+        r'\bchime\b',
+        r'\bding\b',
+        r'\bdong\b',
+        r'\bbuzz\b',
+        r'\bhum\b',
+        r'\bstatic\b',
+        r'\bnoise\b',
+        r'\bbackground noise\b',
+        r'\bdial tone\b',
+        r'\bhangup signal\b',
+        r'\bhang up signal\b',
+        r'\bdisconnect tone\b',
+        r'\bbusy signal\b',
+        r'\bhold music\b',
+        r'\bhold tone\b',
+        r'\bwaiting tone\b',
+        r'\bconnection sound\b',
+        r'\bphone sound\b',
+        r'\btelephone sound\b',
+        r'\bline noise\b',
+        r'\binterference\b',
+        r'\bdistortion\b',
+        r'\bfeedback\b',
+        r'\becho\b',
+        r'\bdelay\b',
+        r'\blatency\b',
+        r'\bdead air\b',
+        r'\bsilence\b',
+        r'\bquiet\b',
+        r'\bwhite noise\b',
+        r'\bpink noise\b',
+        r'\bbrown noise\b',
+        r'\bambient noise\b',
+        r'\broom tone\b',
+        r'\bair conditioning\b',
+        r'\bventilation\b',
+        r'\bfan noise\b',
+        r'\bengine noise\b',
+        r'\btraffic noise\b',
+        r'\bconstruction noise\b',
+        r'\bconversation noise\b',
+        r'\bcrowd noise\b',
+        r'\bbackground conversation\b',
+        r'\bbackground music\b',
+        r'\bbackground tv\b',
+        r'\bbackground radio\b',
+        r'\bbackground audio\b',
+        r'\bbackground sound\b',
+        r'\bbackground voice\b',
+        r'\bbackground speech\b',
+        r'\bbackground talking\b',
+        r'\bbackground chatter\b',
+        r'\bbackground murmur\b',
+        r'\bbackground hum\b',
+        r'\bbackground drone\b',
+        r'\bbackground rumble\b',
+        r'\bbackground roar\b',
+        r'\bbackground hiss\b',
+        r'\bbackground crackle\b',
+        r'\bbackground pop\b',
+        r'\bbackground snap\b',
+        r'\bbackground crack\b',
+        r'\bbackground thud\b',
+        r'\bbackground thump\b',
+        r'\bbackground bang\b',
+        r'\bbackground crash\b',
+        r'\bbackground slam\b',
+        r'\bbackground knock\b',
+        r'\bbackground tap\b',
+        r'\bbackground tick\b',
+        r'\bbackground tock\b',
+        r'\bbackground tick tock\b',
+        r'\bbackground clock\b',
+        r'\bbackground alarm\b',
+        r'\bbackground ring\b',
+        r'\bbackground ringtone\b',
+        r'\bbackground notification\b',
+        r'\bbackground alert\b',
+        r'\bbackground warning\b',
+        r'\bbackground error\b',
+        r'\bbackground system\b',
+        r'\bbackground computer\b',
+        r'\bbackground device\b',
+        r'\bbackground machine\b',
+        r'\bbackground equipment\b',
+        r'\bbackground appliance\b',
+        r'\bbackground tool\b',
+        r'\bbackground instrument\b',
+        r'\bbackground apparatus\b',
+        r'\bbackground mechanism\b',
+        r'\bbackground contraption\b',
+        r'\bbackground gadget\b',
+        r'\bbackground gizmo\b',
+        r'\bbackground widget\b',
+        r'\bbackground thingamajig\b',
+        r'\bbackground whatchamacallit\b',
+        r'\bbackground doohickey\b',
+        r'\bbackground doodad\b',
+        r'\bbackground thingy\b',
+        r'\bbackground thing\b',
+        r'\bbackground object\b',
+        r'\bbackground item\b',
+        r'\bbackground piece\b',
+        r'\bbackground part\b',
+        r'\bbackground component\b',
+        r'\bbackground element\b',
+        r'\bbackground factor\b',
+        r'\bbackground aspect\b',
+        r'\bbackground feature\b',
+        r'\bbackground characteristic\b',
+        r'\bbackground property\b',
+        r'\bbackground attribute\b',
+        r'\bbackground quality\b',
+        r'\bbackground trait\b',
+        r'\bbackground mark\b',
+        r'\bbackground sign\b',
+        r'\bbackground indicator\b',
+        r'\bbackground signal\b',
+        r'\bbackground cue\b',
+        r'\bbackground hint\b',
+        r'\bbackground clue\b',
+        r'\bbackground evidence\b',
+        r'\bbackground proof\b',
+        r'\bbackground trace\b',
+        r'\bbackground remnant\b',
+        r'\bbackground residue\b',
+        r'\bbackground leftover\b',
+        r'\bbackground remainder\b',
+        r'\bbackground excess\b',
+        r'\bbackground surplus\b',
+        r'\bbackground extra\b',
+        r'\bbackground additional\b',
+        r'\bbackground supplementary\b',
+        r'\bbackground complementary\b',
+        r'\bbackground auxiliary\b',
+        r'\bbackground secondary\b',
+        r'\bbackground tertiary\b',
+        r'\bbackground quaternary\b',
+        r'\bbackground quinary\b',
+        r'\bbackground senary\b',
+        r'\bbackground septenary\b',
+        r'\bbackground octonary\b',
+        r'\bbackground nonary\b',
+        r'\bbackground denary\b',
+        r'\bbackground undenary\b',
+        r'\bbackground duodenary\b',
+        r'\bbackground tredenary\b',
+        r'\bbackground quattuordenary\b',
+        r'\bbackground quindenary\b',
+        r'\bbackground sexdenary\b',
+        r'\bbackground septendenary\b',
+        r'\bbackground octodenary\b',
+        r'\bbackground novemdenary\b',
+        r'\bbackground vigintenary\b',
+    ]
+    
+    for pattern in removal_patterns:
+        cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE)
+    
+    # Check for excessive repetitions before cleaning
+    if has_excessive_repetitions(cleaned_text):
+        logger.info(f"🚫 Suppressing transcription due to excessive repetitions: '{original_text}'")
+        return "", True
+    
+    # Remove excessive repeated words/phrases
+    cleaned_text = remove_repeated_phrases(cleaned_text)
+    
+    # Clean up extra whitespace
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+    
+    # If cleaning removed too much content, suppress
+    if not cleaned_text or len(cleaned_text.strip()) < 3:
+        logger.info(f"🚫 Suppressing transcription after cleaning (too little content): '{original_text}' -> '{cleaned_text}'")
+        return "", True
+    
+    # Log if we cleaned anything
+    if cleaned_text != original_text:
+        logger.info(f"🧹 Cleaned transcription: '{original_text}' -> '{cleaned_text}'")
+    
+    return cleaned_text, False
+
+def has_excessive_repetitions(text: str) -> bool:
+    """
+    Check if text has excessive repetitions that indicate noise/artifacts.
+    Allow repetitions only for time-related words and yes/no responses.
+    
+    Returns:
+        bool: True if text should be suppressed due to excessive repetitions
+    """
+    if not text:
+        return False
+    
+    # Split into words
+    words = text.split()
+    if len(words) <= 2:
+        return False
+    
+    # Define allowed repetition words (time-related and yes/no responses)
+    allowed_repetition_words = {
+        # Time-related words
+        'am', 'pm', 'a.m.', 'p.m.', 'morning', 'afternoon', 'evening', 'night',
+        'today', 'tomorrow', 'yesterday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+        'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+        'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+        'o\'clock', 'oclock', 'hour', 'hours', 'minute', 'minutes', 'second', 'seconds',
+        # Yes/no responses
+        'yes', 'no', 'yeah', 'yep', 'yup', 'nope', 'nah', 'ok', 'okay', 'sure', 'right',
+        # Numbers (for time)
+        'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+        'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+        'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred',
+        # Time indicators
+        'sharp', 'exactly', 'precisely', 'around', 'about', 'approximately', 'roughly',
+        'early', 'late', 'soon', 'later', 'earlier', 'now', 'then', 'when', 'time'
+    }
+    
+    # Check for single word repetitions (3+ consecutive same word)
+    i = 0
+    while i < len(words):
+        word = words[i].lower().strip('.,!?')
+        if not word:  # Skip empty words
+            i += 1
+            continue
+            
+        # Count consecutive repetitions of this word
+        repetitions = 1
+        j = i + 1
+        while j < len(words) and words[j].lower().strip('.,!?') == word:
+            repetitions += 1
+            j += 1
+        
+        # If we have 3+ repetitions of the same word, check if it's allowed
+        if repetitions >= 3:
+            if word in allowed_repetition_words:
+                logger.info(f"✅ Allowed repetition for '{word}' repeated {repetitions} times (time/yes-no word)")
+                # Continue processing - this will be cleaned to single instance later
+            else:
+                logger.info(f"🚫 Excessive word repetition detected: '{word}' repeated {repetitions} times")
+                return True
+        
+        i = j
+    
+    # Check for phrase repetitions (2+ consecutive same phrase)
+    for phrase_length in [2, 3]:
+        if len(words) >= phrase_length * 2:
+            i = 0
+            while i < len(words):
+                if i + phrase_length * 2 <= len(words):
+                    # Get current phrase and next phrase
+                    current_phrase = [w.lower().strip('.,!?') for w in words[i:i+phrase_length]]
+                    next_phrase = [w.lower().strip('.,!?') for w in words[i+phrase_length:i+phrase_length*2]]
+                    
+                    if current_phrase == next_phrase:
+                        # Found repetition, count how many times it repeats
+                        phrase_repetitions = 1
+                        check_pos = i + phrase_length
+                        while check_pos + phrase_length <= len(words):
+                            check_phrase = [w.lower().strip('.,!?') for w in words[check_pos:check_pos+phrase_length]]
+                            if check_phrase == current_phrase:
+                                phrase_repetitions += 1
+                                check_pos += phrase_length
+                            else:
+                                break
+                        
+                        # Check if phrase contains only allowed repetition words
+                        phrase_text = ' '.join(current_phrase)
+                        all_words_allowed = all(w in allowed_repetition_words for w in current_phrase)
+                        
+                        if phrase_repetitions >= 2:
+                            if all_words_allowed:
+                                logger.info(f"✅ Allowed phrase repetition: '{phrase_text}' repeated {phrase_repetitions} times (time/yes-no phrase)")
+                                # Continue processing - this will be cleaned to single instance later
+                            else:
+                                logger.info(f"🚫 Excessive phrase repetition detected: '{phrase_text}' repeated {phrase_repetitions} times")
+                                return True
+                
+                i += 1
+    
+    return False
+
+def remove_repeated_phrases(text: str) -> str:
+    """
+    Remove excessive repetition of words and short phrases.
+    Examples:
+    - "second, second, second, second" -> "second"
+    - "the the the problem" -> "the problem"
+    - "help me help me help me" -> "help me"
+    """
+    if not text:
+        return text
+    
+    # Split into words
+    words = text.split()
+    if len(words) <= 2:
+        return text
+    
+    # Remove consecutive repeated words
+    cleaned_words = []
+    i = 0
+    while i < len(words):
+        word = words[i]
+        cleaned_words.append(word)
+        
+        # Count consecutive repetitions of this word
+        repetitions = 1
+        j = i + 1
+        while j < len(words) and words[j].lower().strip('.,!?') == word.lower().strip('.,!?'):
+            repetitions += 1
+            j += 1
+        
+        # If we found repetitions, skip them (keep only the first occurrence)
+        if repetitions > 1:
+            logger.info(f"🔄 Removed {repetitions-1} repetitions of word '{word}'")
+            i = j
+        else:
+            i += 1
+    
+    # Join back into text
+    result = ' '.join(cleaned_words)
+    
+    # Handle repeated short phrases (2-3 words)
+    # Look for patterns like "help me help me" or "can you can you"
+    for phrase_length in [2, 3]:
+        if len(cleaned_words) >= phrase_length * 2:
+            # Check for repeated phrases
+            new_words = []
+            i = 0
+            while i < len(cleaned_words):
+                if i + phrase_length * 2 <= len(cleaned_words):
+                    # Get current phrase and next phrase
+                    current_phrase = cleaned_words[i:i+phrase_length]
+                    next_phrase = cleaned_words[i+phrase_length:i+phrase_length*2]
+                    
+                    # Normalize for comparison (remove punctuation, lowercase)
+                    current_normalized = [w.lower().strip('.,!?') for w in current_phrase]
+                    next_normalized = [w.lower().strip('.,!?') for w in next_phrase]
+                    
+                    if current_normalized == next_normalized:
+                        # Found repetition, count how many times it repeats
+                        phrase_repetitions = 1
+                        check_pos = i + phrase_length
+                        while check_pos + phrase_length <= len(cleaned_words):
+                            check_phrase = cleaned_words[check_pos:check_pos+phrase_length]
+                            check_normalized = [w.lower().strip('.,!?') for w in check_phrase]
+                            if check_normalized == current_normalized:
+                                phrase_repetitions += 1
+                                check_pos += phrase_length
+                            else:
+                                break
+                        
+                        # Keep only first occurrence
+                        if phrase_repetitions > 1:
+                            logger.info(f"🔄 Removed {phrase_repetitions-1} repetitions of phrase '{' '.join(current_phrase)}'")
+                        new_words.extend(current_phrase)
+                        i = check_pos
+                    else:
+                        new_words.append(cleaned_words[i])
+                        i += 1
+                else:
+                    new_words.append(cleaned_words[i])
+                    i += 1
+            
+            cleaned_words = new_words
+            result = ' '.join(cleaned_words)
+    
+    return result
+
+# Now update the existing transcription processing code
