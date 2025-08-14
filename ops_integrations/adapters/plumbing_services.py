@@ -1,62 +1,35 @@
 """
 Plumbing Services Configuration
 Contains all service types, keywords, and related configurations for the phone intent recognition system.
-Enhanced with BERT NLP for semantic understanding.
+Uses fast keyword-based matching for efficient intent detection.
 """
 
 import json
 import os
 from typing import Dict, List, Any, Tuple
 
-# Handle optional dependencies
+# Handle optional dependencies - numpy no longer required since BERT is disabled
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
 except ImportError:
     NUMPY_AVAILABLE = False
-    print("Warning: numpy not available. BERT functionality will be limited.")
 
 try:
     from sentence_transformers import SentenceTransformer
     from sklearn.metrics.pairwise import cosine_similarity
-    BERT_AVAILABLE = True
-    print("Using sentence-transformers for BERT functionality")
+    BERT_AVAILABLE = False  # Disabled: causing excessive batch processing
+    print("BERT functionality disabled - using keyword-based detection only.")
+    SentenceTransformer = None
+    cosine_similarity = None
 except ImportError:
     print("Warning: sentence-transformers not available. Using keyword-based detection only.")
     BERT_AVAILABLE = False
     SentenceTransformer = None
     cosine_similarity = None
 
-# Initialize BERT model for semantic similarity
+# BERT model initialization disabled to eliminate batch processing overhead
 BERT_MODEL = None
-if BERT_AVAILABLE:
-    try:
-        model_name = os.getenv("SENTENCE_TRANSFORMERS_MODEL", "all-MiniLM-L6-v2")
-        model_path_override = os.getenv("SENTENCE_TRANSFORMERS_MODEL_PATH", "").strip()
-        if model_path_override and os.path.isdir(model_path_override):
-            BERT_MODEL = SentenceTransformer(model_path_override)
-        else:
-            BERT_MODEL = SentenceTransformer(model_name)
-    except Exception as e:
-        # Fallback: try loading from local HF cache (offline)
-        try:
-            import glob
-            cache_home = os.getenv("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
-            model_cache_dir = f"models--sentence-transformers--{model_name.replace('/', '--')}"
-            snapshots_glob = os.path.join(cache_home, "hub", model_cache_dir, "snapshots", "*")
-            candidates = sorted(glob.glob(snapshots_glob))
-            if candidates:
-                offline_path = candidates[-1]
-                os.environ["HF_HUB_OFFLINE"] = "1"
-                os.environ["TRANSFORMERS_OFFLINE"] = "1"
-                BERT_MODEL = SentenceTransformer(offline_path)
-                print(f"Loaded BERT model from local cache: {offline_path}")
-            else:
-                print(f"Warning: Could not initialize BERT model: {e}")
-                BERT_AVAILABLE = False
-        except Exception as e2:
-            print(f"Warning: Could not initialize BERT model (offline fallback failed): {e}; {e2}")
-            BERT_AVAILABLE = False
 
 # All available plumbing service types
 PLUMBING_SERVICES = [
@@ -555,27 +528,8 @@ def infer_multiple_job_types_from_text(text: str) -> dict:
                     all_matches.append(match_data)
                     break  # Only record first match per service type
     
-    # Only add BERT semantic matches if no keyword matches found (conservative approach)
-    if BERT_AVAILABLE and len(all_matches) == 0:
-        semantic_matches = get_semantic_service_matches(text_lower, SERVICE_KEYWORDS, semantic_threshold=0.6)  # Higher threshold
-        
-        for service_type, similarity_score, matched_keyword in semantic_matches:
-            # Only add if similarity is very high (conservative)
-            if similarity_score >= 0.6:
-                match_data = {
-                    'position': 0,  # Default position for semantic matches
-                    'service': service_type,
-                    'keyword': matched_keyword,
-                    'hierarchy': service_hierarchy.get(service_type, 2),
-                    'sentence_idx': 0,
-                    'sentence': text_lower,
-                    'proximity_score': similarity_score * 50,  # Scale similarity to proximity score
-                    'match_type': 'semantic',
-                    'semantic_score': similarity_score,
-                    'confidence': similarity_score
-                }
-                
-                all_matches.append(match_data)
+    # BERT semantic matching disabled to eliminate batch processing overhead
+    # System now relies entirely on keyword-based matching which is fast and effective
     
     if not all_matches:
         return {

@@ -699,7 +699,7 @@ export default function LiveOpsDashboard() {
           <div className="flex items-center gap-3 text-sm">
             <div className="text-white/70">SLA Clock</div>
             <div className={`px-2 py-1 rounded font-mono ${slaRunning ? (elapsedSec > slaTarget ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300') : 'bg-white/10 text-white/80'}`}>
-              {formatTime(elapsedSec)} / 00:20
+              {formatTime(elapsedSec)} / 02:00
             </div>
           </div>
         </div>

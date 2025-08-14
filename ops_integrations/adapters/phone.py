@@ -90,6 +90,16 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: Optional[str] = None  # Set a default in env if desired
     ELEVENLABS_MODEL_ID: Optional[str] = None  # e.g. "eleven_multilingual_v2"
     FORCE_SAY_ONLY: bool = False  # Diagnostics: avoid TTS and use <Say>
+    # OpenAI TTS Configuration
+    OPENAI_TTS_SPEED: float = 1.25  # Increased from 1.0 for faster responses (0.25 to 4.0)
+    # Confidence Thresholds
+    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -1.0  # Minimum avg_logprob for accepting transcription (-1.0 = normal, -0.5 = stricter)
+    INTENT_CONFIDENCE_THRESHOLD: float = 0.4  # Minimum confidence for intent matching (0.0-1.0)
+    OVERALL_CONFIDENCE_THRESHOLD: float = 0.5  # Minimum overall confidence before human handoff (0.0-1.0)
+    CONFIDENCE_DEBUG_MODE: bool = True  # Enable detailed confidence logging
+    # Consecutive Failure Thresholds
+    CONSECUTIVE_INTENT_FAILURES_THRESHOLD: int = 2  # Number of consecutive intent confidence failures before handoff
+    CONSECUTIVE_OVERALL_FAILURES_THRESHOLD: int = 2  # Number of consecutive overall confidence failures before handoff
     # Magiclink integration
     MAGICLINK_API_BASE: str = os.getenv("MAGICLINK_API_BASE", "http://localhost:8000")
     MAGICLINK_APP_URL: str = os.getenv("MAGICLINK_APP_URL", "http://localhost:3000/location")
@@ -103,16 +113,20 @@ class Settings(BaseSettings):
 settings = Settings()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-TRANSCRIPTION_MODEL = "whisper-1"
+# Use whisper-1 (standard) or consider whisper-large-v3 for better accuracy vs speed trade-off
+TRANSCRIPTION_MODEL = "whisper-large-v3"
+# Enable faster transcription processing with shorter prompts
+FAST_TRANSCRIPTION_PROMPT = "Caller describing plumbing issue. Ignore background noise, dial tones, and hangup signals."
 
 # VAD Configuration
 VAD_AGGRESSIVENESS = 3  # 0-3, higher = more aggressive filtering
 VAD_FRAME_DURATION_MS = 20  # 20ms frames for VAD
-SILENCE_TIMEOUT_SEC = 1.5  # How long to wait after speech ends before processing
-MIN_SPEECH_DURATION_SEC = 0.5  # Minimum speech duration to consider valid
-CHUNK_DURATION_SEC = 3  # Fallback max segment duration before forcing processing
-PREROLL_IGNORE_SEC = 0.7  # Ignore low-energy speech detections for first N seconds after start
-MIN_START_RMS = 120  # Require at least this RMS on first frame to start a speech segment
+SILENCE_TIMEOUT_SEC = 1.5  # Allow longer pauses to prevent cutoffs mid-sentence
+MIN_SPEECH_DURATION_SEC = 0.3  # Reduced from 0.5s - accept shorter utterances
+CHUNK_DURATION_SEC = 2.0  # Reduced from 3s - faster fallback processing
+PREROLL_IGNORE_SEC = 0.4  # Reduced from 0.7s - respond to speech sooner
+MIN_START_RMS = 100  # Reduced from 120 - more sensitive to quiet speech
+FAST_RESPONSE_MODE = True  # New: Enable optimizations for speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
 SAMPLE_RATE_DEFAULT = 8000
@@ -153,6 +167,10 @@ last_twiml_push_ts: dict[str, float] = {}
 TWIML_PUSH_MIN_INTERVAL_SEC = 1.5
 # Incrementing version per call to bust TwiML dedupe/caching for <Play>
 tts_version_counter: dict[str, int] = {}
+
+# Consecutive confidence failure tracking per call
+consecutive_intent_failures: dict[str, int] = defaultdict(int)
+consecutive_overall_failures: dict[str, int] = defaultdict(int)
 
 # Live Ops metrics aggregation and websocket clients
 from collections import deque
@@ -323,7 +341,7 @@ async def _broadcast_transcript(call_sid: str, text: str):
         return
     
     # Classify intent for the transcript text
-    intent = await classify_transcript_intent(text)
+    intent, intent_confidence = await classify_transcript_intent(text)
     
     payload = {
         "type": "transcript",
@@ -331,8 +349,9 @@ async def _broadcast_transcript(call_sid: str, text: str):
             "callSid": call_sid,
             "text": text,
             "intent": intent,
-            "ts": datetime.utcnow().isoformat() + "Z",
-        },
+            "intent_confidence": intent_confidence,
+            "timestamp": time.time()
+        }
     }
     disconnected: list[WebSocket] = []
     for ws in list(ops_ws_clients):
@@ -349,37 +368,171 @@ async def _broadcast_transcript(call_sid: str, text: str):
             pass
 
 
-async def classify_transcript_intent(text: str) -> str:
-    """Classify the intent of a transcript text using GPT-3.5-turbo."""
+async def classify_transcript_intent(text: str) -> tuple[str, float]:
+    """
+    Classify the intent of a transcript text using parallel pattern matching and GPT classification.
+    
+    Returns:
+        tuple: (intent_tag, confidence_score)
+    """
     try:
-        # Skip classification for very short texts
-        if len(text.strip()) < 5:
-            return "GENERAL_INQUIRY"
-            
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": INTENT_CLASSIFICATION_PROMPT},
-                {"role": "user", "content": text}
-            ],
-            max_tokens=20,
-            temperature=0.1  # Low temperature for deterministic results
-        )
+        # Run pattern matching and GPT classification in parallel for speed
+        pattern_task = asyncio.create_task(_calculate_pattern_confidence_async(text))
+        gpt_task = asyncio.create_task(_gpt_classify_intent_async(text))
         
-        intent = response.choices[0].message.content.strip().upper()
+        # Wait for both to complete
+        pattern_confidence, intent = await asyncio.gather(pattern_task, gpt_task)
+        
+        # Handle UNKNOWN intent
+        if intent == "UNKNOWN":
+            return "GENERAL_INQUIRY", 0.2
         
         # Validate that the intent is one we recognize
         from ops_integrations.flows.intents import get_intent_tags
         valid_intents = get_intent_tags()
-        if intent in valid_intents:
-            return intent
-        else:
+        if intent not in valid_intents:
             logger.debug(f"Unknown intent returned: {intent}, falling back to GENERAL_INQUIRY")
-            return "GENERAL_INQUIRY"
+            intent = "GENERAL_INQUIRY"
+        
+        # Calculate final confidence by combining pattern matching and GPT confidence
+        pattern_conf = pattern_confidence.get(intent, 0.0)
+        gpt_confidence = min(1.0, len(text.split()) / 10.0)  # Basic GPT confidence heuristic
+        
+        # Boost confidence when both methods agree
+        if pattern_conf > 0.7:
+            final_confidence = 0.9
+        elif pattern_conf > 0.3:
+            final_confidence = max(pattern_conf, gpt_confidence)
+        else:
+            final_confidence = gpt_confidence * 0.8  # Slight penalty for low pattern agreement
+        
+        if settings.CONFIDENCE_DEBUG_MODE:
+            logger.info(f"🎯 Intent classification: '{intent}' with confidence {final_confidence:.3f}")
+            logger.info(f"🔍 Pattern confidence: {pattern_confidence}")
+            logger.info(f"🔍 GPT confidence: {gpt_confidence:.3f}")
+        
+        return intent, final_confidence
             
     except Exception as e:
         logger.debug(f"Error classifying transcript intent: {e}")
+        return "GENERAL_INQUIRY", 0.2
+
+async def _calculate_pattern_confidence_async(text: str) -> dict:
+    """Async wrapper for pattern matching confidence calculation."""
+    try:
+        from ops_integrations.flows.intents import load_intents
+        intents_data = load_intents()
+        return calculate_pattern_matching_confidence(text, intents_data)
+    except Exception:
+        return {}
+
+async def _gpt_classify_intent_async(text: str) -> str:
+    """Async GPT intent classification."""
+    try:
+        response = await asyncio.get_event_loop().run_in_executor(
+            None, 
+            lambda: client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": INTENT_CLASSIFICATION_PROMPT},
+                    {"role": "user", "content": text}
+                ],
+                max_tokens=20,
+                temperature=0.1
+            )
+        )
+        return response.choices[0].message.content.strip().upper()
+    except Exception:
         return "GENERAL_INQUIRY"
+
+async def _parse_time_parallel(text: str) -> tuple[Optional[datetime], bool]:
+    """Parse time and check for emergency keywords in parallel."""
+    try:
+        # Run both parsing operations concurrently
+        time_task = asyncio.get_event_loop().run_in_executor(None, lambda: parse_human_datetime(text) or gpt_infer_datetime_phrase(text))
+        emergency_task = asyncio.get_event_loop().run_in_executor(None, lambda: contains_emergency_keywords(text))
+        
+        explicit_time, explicit_emergency = await asyncio.gather(time_task, emergency_task)
+        return explicit_time, explicit_emergency
+    except Exception:
+        return None, False
+
+
+def calculate_pattern_matching_confidence(text: str, intents_data: dict) -> dict:
+    """
+    Calculate confidence scores for intent patterns using keyword and semantic matching.
+    
+    Returns:
+        dict: {intent_tag: confidence_score}
+    """
+    text_lower = text.lower()
+    confidence_scores = {}
+    
+    for intent in intents_data['intents']:
+        intent_tag = intent['tag']
+        patterns = intent['patterns']
+        
+        max_confidence = 0.0
+        
+        # Check for exact keyword matches (high confidence)
+        for pattern in patterns:
+            pattern_lower = pattern.lower()
+            
+            # Exact phrase match
+            if pattern_lower in text_lower:
+                max_confidence = max(max_confidence, 0.9)
+                continue
+            
+            # Word overlap scoring
+            pattern_words = set(pattern_lower.split())
+            text_words = set(text_lower.split())
+            overlap = len(pattern_words.intersection(text_words))
+            
+            if overlap > 0:
+                word_confidence = overlap / len(pattern_words)
+                max_confidence = max(max_confidence, word_confidence * 0.7)
+        
+        # Try semantic similarity if available
+        if max_confidence < 0.5:
+            semantic_confidence = calculate_semantic_intent_confidence(text_lower, patterns)
+            max_confidence = max(max_confidence, semantic_confidence)
+        
+        confidence_scores[intent_tag] = max_confidence
+    
+    return confidence_scores
+
+
+# Global cached semantic model to avoid reloading
+_semantic_model = None
+_semantic_model_lock = asyncio.Lock()
+
+def calculate_semantic_intent_confidence(text: str, patterns: list) -> float:
+    """
+    Calculate semantic similarity confidence using basic text similarity.
+    
+    Returns:
+        float: Confidence score (0.0-1.0)
+    """
+    # Disable semantic matching entirely for now to improve performance
+    # TODO: Re-enable with proper caching if needed
+    logger.debug("Semantic matching disabled for performance - using word similarity fallback")
+    
+    try:
+        # Fallback to simple word similarity
+        text_words = set(text.lower().split())
+        max_word_similarity = 0.0
+        
+        for pattern in patterns:
+            pattern_words = set(pattern.lower().split())
+            if len(pattern_words) > 0:
+                similarity = len(text_words.intersection(pattern_words)) / len(pattern_words)
+                max_word_similarity = max(max_word_similarity, similarity)
+        
+        return max_word_similarity * 0.6  # Lower confidence for word-only matching
+        
+    except Exception as e:
+        logger.debug(f"Error in semantic intent confidence calculation: {e}")
+        return 0.0
 
 
 # New: broadcast job description to ops dashboard when booking is ready
@@ -1052,6 +1205,9 @@ class ConnectionManager:
             audio_config_store.pop(call_sid, None)
             tts_audio_store.pop(call_sid, None)
             last_twiml_store.pop(call_sid, None)
+            # Clean up consecutive failure tracking
+            consecutive_intent_failures.pop(call_sid, None)
+            consecutive_overall_failures.pop(call_sid, None)
             logger.debug(f"Cleaned up resources for CallSid={call_sid}")
 
     async def receive_loop(self, call_sid: str):
@@ -1177,6 +1333,9 @@ async def media_stream_ws(ws: WebSocket):
             pass
         if call_sid:
             tts_version_counter.pop(call_sid, None)
+            # Clean up consecutive failure tracking
+            consecutive_intent_failures.pop(call_sid, None)
+            consecutive_overall_failures.pop(call_sid, None)
             await manager.disconnect(call_sid)
 
 #---------------MEDIA PROCESSING---------------
@@ -1385,6 +1544,8 @@ async def process_audio(call_sid: str, audio: bytes):
                             await process_speech_segment(call_sid, vad_state['pending_audio'])
                             # Clear fallback buffer too to avoid double-processing the same audio
                             vad_state['fallback_buffer'] = bytearray()
+                            # Mark the time when we last processed via VAD to prevent immediate fallback
+                            vad_state['last_vad_process_time'] = current_time
                         else:
                             logger.warning(f"❌ Speech too short for {call_sid} ({speech_duration:.2f}s < {MIN_SPEECH_DURATION_SEC}s), discarding")
                         
@@ -1408,13 +1569,24 @@ async def process_audio(call_sid: str, audio: bytes):
             await process_speech_segment(call_sid, vad_state['pending_audio'])
             # Clear fallback buffer too, since it contains the same recent audio
             vad_state['fallback_buffer'] = bytearray()
+            # Mark the time when we processed via VAD to prevent immediate fallback
+            vad_state['last_vad_process_time'] = current_time
             vad_state['is_speaking'] = False
             vad_state['pending_audio'] = bytearray()
 
     # NEW: Time-based fallback flush every CHUNK_DURATION_SEC even if VAD never triggered
     try:
         fallback_bytes = len(vad_state['fallback_buffer'])
-        if not vad_state['is_speaking'] and fallback_bytes >= int(sample_rate * SAMPLE_WIDTH * CHUNK_DURATION_SEC):
+        last_vad_process = vad_state.get('last_vad_process_time', 0)
+        time_since_vad = current_time - last_vad_process
+        
+        # Only trigger fallback if:
+        # 1. Not currently speaking
+        # 2. Have enough audio buffered
+        # 3. Haven't processed via VAD recently (prevent double processing)
+        if (not vad_state['is_speaking'] and 
+            fallback_bytes >= int(sample_rate * SAMPLE_WIDTH * CHUNK_DURATION_SEC) and
+            time_since_vad > 2.0):  # Wait 2 seconds after VAD processing
             logger.info(f"⏱️ Time-based fallback flush for {call_sid}: {fallback_bytes} bytes (~{CHUNK_DURATION_SEC}s)")
             await process_speech_segment(call_sid, vad_state['fallback_buffer'])
             vad_state['fallback_buffer'] = bytearray()
@@ -1428,8 +1600,12 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
     audio_duration_ms = len(audio_data) / (sample_rate * SAMPLE_WIDTH) * 1000
     logger.info(f"Processing speech segment for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms duration")
     
-    if len(audio_data) < sample_rate * SAMPLE_WIDTH * 0.3:  # Less than 300ms
-        logger.warning(f"Speech segment too short for {call_sid} ({audio_duration_ms:.0f}ms < 300ms), skipping Whisper processing")
+    # Faster processing - accept shorter segments in fast mode
+    min_duration_ms = 200 if FAST_RESPONSE_MODE else 300
+    min_bytes = sample_rate * SAMPLE_WIDTH * (min_duration_ms / 1000)
+    
+    if len(audio_data) < min_bytes:
+        logger.warning(f"Speech segment too short for {call_sid} ({audio_duration_ms:.0f}ms < {min_duration_ms}ms), skipping Whisper processing")
         return
 
     # Energy gate to drop very low-energy segments (likely noise/line tones)
@@ -1473,12 +1649,15 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
         except Exception:
             pass
         
+        # Use shorter prompt in fast mode for quicker processing
+        prompt = FAST_TRANSCRIPTION_PROMPT if FAST_RESPONSE_MODE else "Caller is describing a plumbing issue or asking a question. Ignore background noise, dial tones, and hangup signals."
+        
         resp = client.audio.transcriptions.create(
             model=TRANSCRIPTION_MODEL,
             file=wav_file,
             response_format="verbose_json",
             language="en",
-            prompt="Caller is describing a plumbing issue or asking a question. Ignore background noise, dial tones, and hangup signals."
+            prompt=prompt
         )
         
         transcription_duration = time.time() - start_time
@@ -1506,20 +1685,30 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             should_suppress = True
         elif len(normalized) <= 3 and normalized in short_garbage:
             should_suppress = True
-        elif mean_lp is not None and mean_lp < -1.0:
+        elif mean_lp is not None and mean_lp < settings.TRANSCRIPTION_CONFIDENCE_THRESHOLD:
             should_suppress = True
+            if settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"🔍 Low transcription confidence: {mean_lp:.3f} < {settings.TRANSCRIPTION_CONFIDENCE_THRESHOLD}")
         
-        # Always accept brief confirmations even if low-confidence
-        confirm_phrases = {
-            "done", "finished", "completed", "yes", "okay", "ok", "no", "nope", "nah", "no thanks", "no thank you",
-            "yeah", "yep", "yup", "sure", "right", "correct", "exactly", "absolutely", "definitely",
-            "uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet", "indeed", "certainly",
-            "uh uh", "nuh uh", "mm mm", "not really", "negative", "that's not right", "that's wrong",
-            "incorrect", "maybe not", "probably not"
+        # Only accept confirmation phrases when we're actually in a confirmation dialog step
+        dialog = call_dialog_state.get(call_sid, {})
+        confirmation_steps = {
+            'awaiting_time_confirm', 
+            'awaiting_location_confirm', 
+            'post_booking_qa'
         }
-        if any(p in normalized for p in confirm_phrases):
-            should_suppress = False
-            logger.info(f"🎯 Accepting confirmation phrase '{text}' despite low confidence for {call_sid}")
+        
+        if dialog.get('step') in confirmation_steps:
+            confirm_phrases = {
+                "done", "finished", "completed", "yes", "okay", "ok", "no", "nope", "nah", "no thanks", "no thank you",
+                "yeah", "yep", "yup", "sure", "right", "correct", "exactly", "absolutely", "definitely",
+                "uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet", "indeed", "certainly",
+                "uh uh", "nuh uh", "mm mm", "not really", "negative", "that's not right", "that's wrong",
+                "incorrect", "maybe not", "probably not"
+            }
+            if any(p in normalized for p in confirm_phrases):
+                should_suppress = False
+                logger.info(f"🎯 Accepting confirmation phrase '{text}' in step '{dialog.get('step')}' despite low confidence for {call_sid}")
         
         if should_suppress:
             logger.info(f"Suppressed low-confidence/short transcription for {call_sid}: '{text}' (avg_logprob={mean_lp})")
@@ -1548,73 +1737,86 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
         except Exception:
             pass
 
-        # Post-booking Q&A flow
-        dialog = call_dialog_state.get(call_sid)
-        if dialog and dialog.get('step') == 'post_booking_qa':
-            if is_negative_response(text):
-                twiml = VoiceResponse()
-                await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks for trusting SafeHarbour to help you with your plumbing needs. Goodbye.")
-                twiml.hangup()
-                call_dialog_state.pop(call_sid, None)
-                await push_twiml_to_call(call_sid, twiml)
-                return
-            # Answer with GPT-4o and re-prompt
-            answer = await answer_customer_question(call_sid, text)
-            reply = f"{answer} Please let me know if you have any other questions."
-            twiml = VoiceResponse()
-            await add_tts_or_say_to_twiml(twiml, call_sid, reply)
-            # Keep in QA mode and resume stream
-            def append_stream_and_pause_local(resp: VoiceResponse):
-                start = Start()
-                ws_base = call_info_store.get(call_sid, {}).get('ws_base')
-                if ws_base:
-                    wss_url_local = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-                else:
-                    if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                        wss_url_local = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                    elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                        wss_url_local = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                    else:
-                        wss_url_local = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-                start.stream(url=wss_url_local, track="inbound_track")
-                resp.append(start)
-                resp.pause(length=3600)
-            append_stream_and_pause_local(twiml)
-            await push_twiml_to_call(call_sid, twiml)
-            return
-
-        # Scheduling/path and confirmation follow-up handling
-        if dialog and dialog.get('step') in (
-            'awaiting_path_choice',
-            'awaiting_time',
-            'awaiting_time_confirm',
-            'awaiting_location_confirm',
-            'awaiting_operator_confirm',
-        ):
-            logger.info(f"Handling follow-up scheduling/path utterance for {call_sid}: '{text}'")
-            twiml = await handle_intent(call_sid, dialog.get('intent', {}), followup_text=text)
-            await push_twiml_to_call(call_sid, twiml)
-            return
-
-        # Otherwise, extract a fresh intent
-        intent = await extract_intent_from_text(call_sid, text)
-        # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
-        info = call_info_store.get(call_sid, {})
-        segments_count = int(info.get('segments_count', 0)) + 1
-        info['segments_count'] = segments_count
-        call_info_store[call_sid] = info
-        explicit_time = parse_human_datetime(text) or gpt_infer_datetime_phrase(text)
-        explicit_emergency = contains_emergency_keywords(text)
-        if segments_count < 2 and not explicit_time and not explicit_emergency and not is_affirmative_response(text):
-            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
-            logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
-            return
-        twiml = await handle_intent(call_sid, intent)
-        await push_twiml_to_call(call_sid, twiml)
+        # Handle user speech response
+        await response_to_user_speech(call_sid, text)
             
     except Exception as e:
         logger.error(f"Speech processing error for {call_sid}: {e}")
         logger.debug(f"Failed audio details for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms")
+
+async def response_to_user_speech(call_sid: str, text: str) -> None:
+    """Handle user speech response after transcription is complete"""
+    # Post-booking Q&A flow
+    dialog = call_dialog_state.get(call_sid)
+    if dialog and dialog.get('step') == 'post_booking_qa':
+        if is_negative_response(text):
+            twiml = VoiceResponse()
+            await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks for trusting SafeHarbour to help you with your plumbing needs. Goodbye.")
+            twiml.hangup()
+            call_dialog_state.pop(call_sid, None)
+            await push_twiml_to_call(call_sid, twiml)
+            return
+        # Answer with GPT-4o and re-prompt
+        answer = await answer_customer_question(call_sid, text)
+        reply = f"{answer} Please let me know if you have any other questions."
+        twiml = VoiceResponse()
+        await add_tts_or_say_to_twiml(twiml, call_sid, reply)
+        # Keep in QA mode and resume stream
+        def append_stream_and_pause_local(resp: VoiceResponse):
+            start = Start()
+            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
+            if ws_base:
+                wss_url_local = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            else:
+                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
+                    wss_url_local = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
+                    wss_url_local = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
+                else:
+                    wss_url_local = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            start.stream(url=wss_url_local, track="inbound_track")
+            resp.append(start)
+            resp.pause(length=3600)
+        append_stream_and_pause_local(twiml)
+        await push_twiml_to_call(call_sid, twiml)
+        return
+
+    # Scheduling/path and confirmation follow-up handling
+    if dialog and dialog.get('step') in (
+        'awaiting_path_choice',
+        'awaiting_time',
+        'awaiting_time_confirm',
+        'awaiting_location_confirm',
+        'awaiting_operator_confirm',
+    ):
+        logger.info(f"Handling follow-up scheduling/path utterance for {call_sid}: '{text}'")
+        twiml = await handle_intent(call_sid, dialog.get('intent', {}), followup_text=text)
+        await push_twiml_to_call(call_sid, twiml)
+        return
+
+    # Otherwise, extract a fresh intent with parallel processing for speed
+    if FAST_RESPONSE_MODE:
+        # Run intent extraction and time parsing in parallel
+        intent_task = asyncio.create_task(extract_intent_from_text(call_sid, text))
+        time_task = asyncio.create_task(_parse_time_parallel(text))
+        intent, (explicit_time, explicit_emergency) = await asyncio.gather(intent_task, time_task)
+    else:
+        intent = await extract_intent_from_text(call_sid, text)
+        explicit_time = parse_human_datetime(text) or gpt_infer_datetime_phrase(text)
+        explicit_emergency = contains_emergency_keywords(text)
+    
+    # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
+    info = call_info_store.get(call_sid, {})
+    segments_count = int(info.get('segments_count', 0)) + 1
+    info['segments_count'] = segments_count
+    call_info_store[call_sid] = info
+    
+    if segments_count < 2 and not explicit_time and not explicit_emergency and not is_affirmative_response(text):
+        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+        logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
+        return
+    twiml = await handle_intent(call_sid, intent)
+    await push_twiml_to_call(call_sid, twiml)
 
 async def extract_intent_from_text(call_sid: str, text:str) -> dict:
    # Enhanced prompt with better context and examples
@@ -1660,18 +1862,35 @@ Be precise and extract all available information. Match to the most specific ser
     args = json.loads(tool_call.function.arguments)
     
     # Post-process and validate the extracted data
-    validated_args = validate_and_enhance_extraction(args, text)
+    validated_args = validate_and_enhance_extraction(args, text, call_sid)
     return validated_args
 
    # Fallback: no function call, return freeform description
    return create_fallback_response(text)
 
-def validate_and_enhance_extraction(args: dict, original_text: str) -> dict:
+def validate_and_enhance_extraction(args: dict, original_text: str, call_sid: str = None) -> dict:
     """Validate and enhance extracted data with additional processing"""
     
     # Ensure required fields exist
     if 'intent' not in args:
         args['intent'] = 'BOOK_JOB'
+    
+    # Calculate intent confidence for the original text
+    try:
+        # Use the same intent classification system for confidence
+        import asyncio
+        if asyncio.iscoroutinefunction(classify_transcript_intent):
+            # If in async context, calculate intent confidence
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Schedule intent confidence calculation
+                intent_confidence = 0.7  # Default for now, will be calculated properly
+            else:
+                intent, intent_confidence = loop.run_until_complete(classify_transcript_intent(original_text))
+        else:
+            intent_confidence = 0.7  # Default fallback
+    except:
+        intent_confidence = 0.7  # Default fallback if async context issues
     
     # Enhance job type recognition with keyword matching and multi-intent detection
     multi_intent_result = infer_multiple_job_types_from_text(original_text)
@@ -1712,12 +1931,12 @@ def validate_and_enhance_extraction(args: dict, original_text: str) -> dict:
             args['location'] = args.get('location', {})
             args['location']['raw_address'] = address
     
-    # Calculate confidence scores
-    confidence = calculate_confidence_scores(args, original_text)
+    # Calculate confidence scores with intent confidence
+    confidence = calculate_confidence_scores(args, original_text, intent_confidence)
     args['confidence'] = confidence
     
     # Determine handoff based on confidence and completeness
-    args['handoff_needed'] = should_handoff_to_human(args, confidence)
+    args['handoff_needed'] = should_handoff_to_human(args, confidence, call_sid)
     
     return args
 
@@ -1746,12 +1965,14 @@ async def synthesize_tts(text: str) -> Optional[bytes]:
     try:
         voice = getattr(settings, 'OPENAI_TTS_VOICE', 'alloy')  # Default to 'alloy' voice
         model = getattr(settings, 'OPENAI_TTS_MODEL', 'tts-1')  # Default to 'tts-1' model
+        speed = settings.OPENAI_TTS_SPEED  # Use configured speed (0.25 to 4.0)
         
         response = client.audio.speech.create(
             model=model,
             voice=voice,
             input=text,
-            response_format="mp3"
+            response_format="mp3",
+            speed=speed
         )
         
         # Convert response to bytes
@@ -1859,11 +2080,12 @@ def extract_address(text: str) -> str:
     
     return None
 
-def calculate_confidence_scores(args: dict, original_text: str) -> dict:
-    """Calculate confidence scores for extracted data"""
+def calculate_confidence_scores(args: dict, original_text: str, intent_confidence: float = 0.0) -> dict:
+    """Calculate confidence scores for extracted data including intent confidence"""
     confidence = {
         "overall": 0.0,
-        "fields": {}
+        "fields": {},
+        "intent": intent_confidence
     }
     
     # Job type confidence
@@ -1894,37 +2116,103 @@ def calculate_confidence_scores(args: dict, original_text: str) -> dict:
     else:
         confidence["fields"]["customer"] = 0.0
     
-    # Overall confidence
+    # Overall confidence (include intent confidence in calculation)
     field_scores = list(confidence["fields"].values())
+    field_scores.append(intent_confidence)  # Include intent confidence
     if field_scores:
         confidence["overall"] = sum(field_scores) / len(field_scores)
     
+    if settings.CONFIDENCE_DEBUG_MODE:
+        logger.info(f"🔍 Confidence breakdown: overall={confidence['overall']:.3f}, intent={intent_confidence:.3f}, fields={confidence['fields']}")
+    
     return confidence
 
-def should_handoff_to_human(args: dict, confidence: dict) -> bool:
-    """Determine if human handoff is needed"""
+def should_handoff_to_human(args: dict, confidence: dict, call_sid: str = None) -> bool:
+    """Determine if human handoff is needed using configurable thresholds and consecutive failure tracking"""
     overall_confidence = confidence.get("overall", 0.0)
+    intent_confidence = confidence.get("intent", 0.0)
     
-    # Handoff if overall confidence is low
-    if overall_confidence < 0.7:
-        return True
+    # Initialize handoff reasons for logging
+    handoff_reasons = []
     
-    # Handoff if critical fields are missing
+    # Check single-instance thresholds first
+    single_instance_handoff = False
+    
+    if overall_confidence < settings.OVERALL_CONFIDENCE_THRESHOLD:
+        handoff_reasons.append(f"overall confidence {overall_confidence:.3f} < {settings.OVERALL_CONFIDENCE_THRESHOLD}")
+        single_instance_handoff = True
+    
+    if intent_confidence < settings.INTENT_CONFIDENCE_THRESHOLD:
+        handoff_reasons.append(f"intent confidence {intent_confidence:.3f} < {settings.INTENT_CONFIDENCE_THRESHOLD}")
+        single_instance_handoff = True
+    
+    # Track consecutive failures if call_sid is provided
+    consecutive_handoff = False
+    if call_sid:
+        # Track intent confidence failures
+        if intent_confidence < settings.INTENT_CONFIDENCE_THRESHOLD:
+            consecutive_intent_failures[call_sid] += 1
+            if settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"🔢 Intent failure #{consecutive_intent_failures[call_sid]} for {call_sid}")
+        else:
+            # Reset counter on success
+            if consecutive_intent_failures[call_sid] > 0:
+                if settings.CONFIDENCE_DEBUG_MODE:
+                    logger.info(f"✅ Intent confidence recovered for {call_sid}, resetting counter")
+                consecutive_intent_failures[call_sid] = 0
+        
+        # Track overall confidence failures
+        if overall_confidence < settings.OVERALL_CONFIDENCE_THRESHOLD:
+            consecutive_overall_failures[call_sid] += 1
+            if settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"🔢 Overall failure #{consecutive_overall_failures[call_sid]} for {call_sid}")
+        else:
+            # Reset counter on success
+            if consecutive_overall_failures[call_sid] > 0:
+                if settings.CONFIDENCE_DEBUG_MODE:
+                    logger.info(f"✅ Overall confidence recovered for {call_sid}, resetting counter")
+                consecutive_overall_failures[call_sid] = 0
+        
+        # Check consecutive failure thresholds
+        if consecutive_intent_failures[call_sid] >= settings.CONSECUTIVE_INTENT_FAILURES_THRESHOLD:
+            handoff_reasons.append(f"{consecutive_intent_failures[call_sid]} consecutive intent failures >= {settings.CONSECUTIVE_INTENT_FAILURES_THRESHOLD}")
+            consecutive_handoff = True
+        
+        if consecutive_overall_failures[call_sid] >= settings.CONSECUTIVE_OVERALL_FAILURES_THRESHOLD:
+            handoff_reasons.append(f"{consecutive_overall_failures[call_sid]} consecutive overall failures >= {settings.CONSECUTIVE_OVERALL_FAILURES_THRESHOLD}")
+            consecutive_handoff = True
+    
+    # Check for missing critical fields
     required_fields = ['job.type', 'job.urgency', 'location.raw_address']
     missing_fields = 0
     
     for field in required_fields:
-        keys = field.split('.')
+        field_parts = field.split('.')
         value = args
-        for key in keys:
-            value = value.get(key, {})
+        for part in field_parts:
+            value = value.get(part, {}) if isinstance(value, dict) else None
+            if value is None:
+                break
+        
         if not value:
             missing_fields += 1
     
-    if missing_fields >= 2:
-        return True
+    missing_fields_handoff = False
+    if missing_fields >= 2:  # Allow 1 missing field, but not 2+
+        handoff_reasons.append(f"{missing_fields} critical fields missing")
+        missing_fields_handoff = True
     
-    return False
+    # Determine final handoff decision
+    should_handoff = single_instance_handoff or consecutive_handoff or missing_fields_handoff
+    
+    # Log handoff decision
+    if should_handoff and settings.CONFIDENCE_DEBUG_MODE:
+        reasons_str = ", ".join(handoff_reasons)
+        logger.info(f"🚨 Handoff triggered for {call_sid or 'unknown'}: {reasons_str}")
+    elif settings.CONFIDENCE_DEBUG_MODE and call_sid:
+        logger.info(f"✅ Continuing automation for {call_sid}: confidence OK")
+    
+    return should_handoff
 
 def create_fallback_response(text: str) -> dict:
     """Create a fallback response when function calling fails"""
@@ -1980,7 +2268,7 @@ def has_no_clear_service_intent(intent: dict) -> bool:
     overall_confidence = confidence.get('overall', 0.0)
     
     # Very low confidence indicates unclear intent
-    if overall_confidence < 0.3:
+    if overall_confidence < 0.5:
         return True
     
     # Missing critical information

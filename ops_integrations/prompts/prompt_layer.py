@@ -2,7 +2,9 @@ INTENT_CLASSIFICATION_PROMPT = '''
 You are an intent classifier for Elite Plumbing Co. Given a user SMS message, classify it into one of the following tags (uppercase):
 EMERGENCY_FIX, CLOG_BLOCKAGE, LEAKING_FIXTURE, INSTALL_REQUEST,
 WATER_HEATER_ISSUE, QUOTE_REQUEST, REMODEL_INQUIRY,
-RECURRING_PROBLEM, DRAIN_MAINTENANCE, GENERAL_INQUIRY
+RECURRING_PROBLEM, DRAIN_MAINTENANCE, GENERAL_INQUIRY, UNKNOWN
+
+Use UNKNOWN only when the message is unclear, not plumbing-related, or contains no actionable intent.
 Respond with only the tag name.'''
 
 FOLLOW_UP_PROMPTS = {
@@ -50,3 +52,4 @@ Customer has a general inquiry. Ask location and type:
 SCHEDULER_PROMPT = '''
 After collecting the necessary details (issue, address, date/time), summarize and present booking options:
 "I've got your {issue_tag} at {address}. We can arrive on {day} between {window}. Our flat-rate for this is {price}. Reply 'CONFIRM' to book or 'CHANGE' to adjust."'''
+
