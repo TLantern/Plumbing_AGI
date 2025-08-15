@@ -1,0 +1,14 @@
+# Testing dependencies for modularized phone system
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0
+pytest-cov>=4.0.0
+
+# Core dependencies (for testing)
+openai>=1.0.0
+httpx>=0.24.0
+webrtcvad>=2.0.10
+
+# Optional: for better test output
+pytest-html>=3.1.0
+pytest-xdist>=3.0.0 

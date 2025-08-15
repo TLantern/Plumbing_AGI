@@ -94,9 +94,9 @@ class Settings(BaseSettings):
     OPENAI_TTS_SPEED: float = 1.25  # Increased from 1.0 for faster responses (0.25 to 4.0)
     SPEECH_GATE_BUFFER_SEC: float = 1.0  # Buffer time added to TTS duration for speech gate
     # Confidence Thresholds
-    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -0.8  # Minimum avg_logprob for accepting transcription (-1.0 = normal, -0.5 = stricter)
-    INTENT_CONFIDENCE_THRESHOLD: float = 0.4  # Minimum confidence for intent matching (0.0-1.0)
-    OVERALL_CONFIDENCE_THRESHOLD: float = 0.5  # Minimum overall confidence before human handoff (0.0-1.0)
+    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -0.6  # Increased from -0.8 - stricter transcription quality (-1.0 = normal, -0.5 = stricter)
+    INTENT_CONFIDENCE_THRESHOLD: float = 0.5  # Increased from 0.4 - higher intent confidence requirement
+    OVERALL_CONFIDENCE_THRESHOLD: float = 0.6  # Increased from 0.5 - higher overall confidence requirement
     CONFIDENCE_DEBUG_MODE: bool = True  # Enable detailed confidence logging
     # Consecutive Failure Thresholds
     CONSECUTIVE_INTENT_FAILURES_THRESHOLD: int = 2  # Number of consecutive intent confidence failures before handoff
@@ -114,20 +114,25 @@ class Settings(BaseSettings):
 settings = Settings()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-# Use whisper-1 (standard) or consider whisper-large-v3 for better accuracy vs speed trade-off
+# Transcription configuration
+USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
+USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
+REMOTE_WHISPER_URL = "https://4cbf70c9248c.ngrok-free.app"  # Replace with your ngrok URL
+
+# Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
-# Enable faster transcription processing with shorter prompts
-FAST_TRANSCRIPTION_PROMPT = "Caller describing plumbing issue. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Focus only on human speech."
+# Enhanced prompt for better transcription quality
+FAST_TRANSCRIPTION_PROMPT = "Caller describing plumbing issue. Focus on clear human speech. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Maintain natural speech patterns and context."
 
 # VAD Configuration
-VAD_AGGRESSIVENESS = 3  # 0-3, higher = more aggressive filtering
-VAD_FRAME_DURATION_MS = 20  # 20ms frames for VAD
-SILENCE_TIMEOUT_SEC = 1.5  # Allow longer pauses to prevent cutoffs mid-sentence
-MIN_SPEECH_DURATION_SEC = 0.3  # Reduced from 0.5s - accept shorter utterances
-CHUNK_DURATION_SEC = 2.0  # Reduced from 3s - faster fallback processing
-PREROLL_IGNORE_SEC = 0.4  # Reduced from 0.7s - respond to speech sooner
-MIN_START_RMS = 130  # Reduced from 120 - more sensitive to quiet speech
-FAST_RESPONSE_MODE = True  # New: Enable optimizations for speed
+VAD_AGGRESSIVENESS = 2  # Reduced from 3 - less aggressive filtering for better sensitivity
+VAD_FRAME_DURATION_MS = 30  # Increased from 20ms - better accuracy for voice detection
+SILENCE_TIMEOUT_SEC = 2.0  # Increased from 1.5s - allow longer natural pauses
+MIN_SPEECH_DURATION_SEC = 0.5  # Increased from 0.3s - filter out brief noise
+CHUNK_DURATION_SEC = 3.0  # Increased from 2.0s - more context for processing
+PREROLL_IGNORE_SEC = 0.5  # Increased from 0.4s - better initial speech detection
+MIN_START_RMS = 100  # Reduced from 130 - more sensitive to quiet speech
+FAST_RESPONSE_MODE = False  # Disabled for better quality over speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
 SAMPLE_RATE_DEFAULT = 8000
@@ -1109,7 +1114,7 @@ async def serve_twiml(call_sid: str):
 
 #---------------VOICE WEBHOOK---------------
 # Helper to build WSS URL from incoming request host/proto, with safe fallbacks
-def _build_wss_url_from_request(request: Request, call_sid: str) -> tuple[str, str]:
+def _build_wss_url_from_request(request: Request, call_sid: str, caller_number: str = None) -> tuple[str, str]:
     try:
         hdrs = request.headers
         host = hdrs.get('x-forwarded-host') or hdrs.get('host')
@@ -1118,6 +1123,8 @@ def _build_wss_url_from_request(request: Request, call_sid: str) -> tuple[str, s
         if host:
             ws_base = f"{ws_scheme}://{host}"
             wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            if caller_number:
+                wss_url += f"&From={caller_number}"
             return ws_base, wss_url
     except Exception:
         pass
@@ -1129,7 +1136,36 @@ def _build_wss_url_from_request(request: Request, call_sid: str) -> tuple[str, s
         ws_base = base.replace('http://', 'ws://')
     else:
         ws_base = f"wss://{base}"
-    return ws_base, f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+    wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+    if caller_number:
+        wss_url += f"&From={caller_number}"
+    return ws_base, wss_url
+
+# Helper to build WebSocket URL for resuming streams (uses existing call info)
+def _build_wss_url_for_resume(call_sid: str) -> str:
+    """Build WebSocket URL for resuming streams, using existing call info for caller number"""
+    call_info = call_info_store.get(call_sid, {})
+    ws_base = call_info.get('ws_base')
+    caller_number = call_info.get('from')
+    
+    if ws_base:
+        wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+        if caller_number:
+            wss_url += f"&From={caller_number}"
+        return wss_url
+    else:
+        # Fallback to configured EXTERNAL_WEBHOOK_URL
+        base = settings.EXTERNAL_WEBHOOK_URL
+        if base.startswith('https://'):
+            ws_base = base.replace('https://', 'wss://')
+        elif base.startswith('http://'):
+            ws_base = base.replace('http://', 'ws://')
+        else:
+            ws_base = f"wss://{base}"
+        wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+        if caller_number:
+            wss_url += f"&From={caller_number}"
+        return wss_url
 
 @app.post(settings.VOICE_ENDPOINT)
 async def voice_webhook(request: Request):
@@ -1165,7 +1201,8 @@ async def voice_webhook(request: Request):
     }
     
     # Compute per-call WebSocket base from the inbound request (robust to ngrok URL changes)
-    ws_base, wss_url = _build_wss_url_from_request(request, call_sid)
+    caller_number = form.get("From")
+    ws_base, wss_url = _build_wss_url_from_request(request, call_sid, caller_number)
     call_info["ws_base"] = ws_base
     
     # Store call information for use during the call
@@ -1196,11 +1233,14 @@ async def voice_webhook(request: Request):
 
     #Build TwiML Response
     resp = VoiceResponse()
-    # Greet first, then start streaming so listening begins after the message
-    greet_text = "Thank you for calling SafeHarbour Plumbing Services. If at any point you'd like to speak to a human dispatcher, just say 'transfer'. What can we assist you with today?"
+    # Greet first and collect name, then start streaming so listening begins after the message
+    greet_text = "Hello, thank you for trusting SafeHarbour Plumbing Services for your plumbing issues. Who do I have the pleasure of speaking with?"
     logger.info(f"🗣️ TTS SAY (greeting) for CallSid={call_sid}: {greet_text}")
     # Use TTS helper so greeting benefits from ElevenLabs if configured
     await add_tts_or_say_to_twiml(resp, call_sid, greet_text)
+    
+    # Set initial dialog state to collect name
+    call_dialog_state[call_sid] = {'step': 'awaiting_name'}
     start = Start()
     start.stream(url=wss_url, track="inbound_track")
     resp.append(start)
@@ -1270,13 +1310,16 @@ manager = ConnectionManager()
 async def media_stream_ws(ws: WebSocket):
     await ws.accept()
     call_sid: Optional[str] = None
+    caller_number: Optional[str] = None
     temporary_stream_key: Optional[str] = None
     try:
         # Try to extract CallSid from query params (Twilio may pass it)
         call_sid = ws.query_params.get("callSid")
+        caller_number = ws.query_params.get("From")
         logger.info(f"WebSocket connection accepted for potential CallSid={call_sid}")
         logger.info(f"All query params: {dict(ws.query_params)}")
         logger.info(f"WebSocket URL: {ws.url}")
+        logger.info(f"Caller number: {caller_number}")
 
         # If not present, wait for 'start' event which contains callSid
         if not call_sid:
@@ -1315,6 +1358,15 @@ async def media_stream_ws(ws: WebSocket):
                     if call_sid:
                         manager.active_connections[call_sid] = ws
                         logger.info(f"✅ CallSid found in start event: {call_sid}")
+                        
+                        # Update call info with caller number if we extracted it from query params
+                        if caller_number and call_sid in call_info_store:
+                            call_info = call_info_store[call_sid]
+                            if not call_info.get('from') or call_info.get('from') != caller_number:
+                                call_info['from'] = caller_number
+                                call_info_store[call_sid] = call_info
+                                logger.info(f"📱 Updated caller number for {call_sid}: {caller_number}")
+                        
                         # Process this start packet too
                         asyncio.create_task(handle_media_packet(call_sid, msg))
                         break
@@ -1327,6 +1379,15 @@ async def media_stream_ws(ws: WebSocket):
                     call_sid = possible_call_sid
                     manager.active_connections[call_sid] = ws
                     logger.info(f"✅ CallSid found outside start event: {call_sid}")
+                    
+                    # Update call info with caller number if we extracted it from query params
+                    if caller_number and call_sid in call_info_store:
+                        call_info = call_info_store[call_sid]
+                        if not call_info.get('from') or call_info.get('from') != caller_number:
+                            call_info['from'] = caller_number
+                            call_info_store[call_sid] = call_info
+                            logger.info(f"📱 Updated caller number for {call_sid}: {caller_number}")
+                    
                     asyncio.create_task(handle_media_packet(call_sid, msg))
                     break
                 stream_sid = data.get("streamSid") or (data.get("start") or {}).get("streamSid")
@@ -1343,6 +1404,14 @@ async def media_stream_ws(ws: WebSocket):
         if call_sid not in manager.active_connections:
             manager.active_connections[call_sid] = ws
             logger.info(f"WebSocket connection established for CallSid={call_sid}")
+            
+            # Update call info with caller number if we extracted it from query params
+            if caller_number and call_sid in call_info_store:
+                call_info = call_info_store[call_sid]
+                if not call_info.get('from') or call_info.get('from') != caller_number:
+                    call_info['from'] = caller_number
+                    call_info_store[call_sid] = call_info
+                    logger.info(f"📱 Updated caller number for {call_sid}: {caller_number}")
 
         # Push updated metrics for active call count
         try:
@@ -1653,31 +1722,31 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
     audio_duration_ms = len(audio_data) / (sample_rate * SAMPLE_WIDTH) * 1000
     logger.info(f"Processing speech segment for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms duration")
     
-    # Faster processing - accept shorter segments in fast mode
-    min_duration_ms = 200 if FAST_RESPONSE_MODE else 300
+    # Quality-focused processing - require longer segments for better accuracy
+    min_duration_ms = 400  # Increased from 200/300 - require longer segments for better quality
     min_bytes = sample_rate * SAMPLE_WIDTH * (min_duration_ms / 1000)
     
     if len(audio_data) < min_bytes:
         logger.warning(f"Speech segment too short for {call_sid} ({audio_duration_ms:.0f}ms < {min_duration_ms}ms), skipping Whisper processing")
         return
 
-    # Energy gate to drop very low-energy segments (likely noise/line tones)
-    try:
-        if _audioop is not None:
-            rms = _audioop.rms(bytes(audio_data), 2)
-        else:
-            # Fallback simple RMS
-            import array
-            arr = array.array('h', audio_data)
-            if len(arr) == 0:
-                rms = 0
+            # Energy gate to drop very low-energy segments (likely noise/line tones)
+        try:
+            if _audioop is not None:
+                rms = _audioop.rms(bytes(audio_data), 2)
             else:
-                rms = int((sum(x*x for x in arr) / len(arr)) ** 0.5)
-        if rms < 80:  # lowered threshold to allow quieter segments
-            logger.info(f"Skipping low-energy segment for {call_sid} (RMS={rms})")
-            return
-    except Exception as e:
-        logger.debug(f"RMS calc failed for {call_sid}: {e}")
+                # Fallback simple RMS
+                import array
+                arr = array.array('h', audio_data)
+                if len(arr) == 0:
+                    rms = 0
+                else:
+                    rms = int((sum(x*x for x in arr) / len(arr)) ** 0.5)
+            if rms < 60:  # Reduced from 80 - more sensitive to quiet speech
+                logger.info(f"Skipping low-energy segment for {call_sid} (RMS={rms})")
+                return
+        except Exception as e:
+            logger.debug(f"RMS calc failed for {call_sid}: {e}")
     
     try:
         logger.debug(f"Converting PCM16 to WAV for {call_sid} ({len(audio_data)} bytes) @ {sample_rate} Hz")
@@ -1693,25 +1762,105 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             wav_for_whisper = pcm_to_wav_bytes(converted, target_rate)
             logger.debug(f"Resampled audio for Whisper from {sample_rate} Hz to {target_rate} Hz")
         
-        logger.info(f"Sending audio to Whisper for {call_sid} (model: {TRANSCRIPTION_MODEL})")
+        logger.info(f"Sending audio to Whisper for {call_sid}")
         start_time = time.time()
         
-        wav_file = io.BytesIO(wav_for_whisper)
-        try:
-            wav_file.name = "speech.wav"  # Help the API infer format
-        except Exception:
-            pass
+        # Try local Whisper first if enabled
+        if USE_LOCAL_WHISPER:
+            try:
+                from .local_whisper import transcribe_with_local_whisper
+                
+                # Convert WAV to PCM16 bytes for local Whisper
+                wav_io = io.BytesIO(wav_for_whisper)
+                with wave.open(wav_io, 'rb') as wav_file:
+                    # Read PCM data
+                    pcm_data = wav_file.readframes(wav_file.getnframes())
+                    sample_rate = wav_file.getframerate()
+                
+                logger.info(f"Using local Whisper base for {call_sid}")
+                resp = transcribe_with_local_whisper(
+                    audio_data=pcm_data,
+                    sample_rate=sample_rate,
+                    language="en",
+                    model_name="base"
+                )
+                
+                # Convert local Whisper response to OpenAI format for compatibility
+                openai_resp = type('obj', (object,), {
+                    'text': resp.get('text', ''),
+                    'segments': resp.get('segments', [])
+                })()
+                
+                # Add avg_logprob to segments for confidence calculation
+                for segment in openai_resp.segments:
+                    if 'avg_logprob' not in segment:
+                        segment['avg_logprob'] = -0.5  # Default confidence
+                
+                resp = openai_resp
+                logger.info(f"Local Whisper transcription completed for {call_sid}")
+                
+            except ImportError:
+                logger.warning("Local Whisper not available, falling back to OpenAI Whisper")
+                resp = None
+            except Exception as e:
+                logger.error(f"Local Whisper failed for {call_sid}: {e}, falling back to OpenAI")
+                resp = None
         
-        # Use shorter prompt in fast mode for quicker processing
-        prompt = FAST_TRANSCRIPTION_PROMPT if FAST_RESPONSE_MODE else "Caller is describing a plumbing issue or asking a question. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Focus only on human speech."
+        # Try remote Whisper service
+        if USE_REMOTE_WHISPER and (not USE_LOCAL_WHISPER or resp is None):
+            try:
+                import base64
+                import httpx
+                
+                # Convert WAV to base64
+                wav_base64 = base64.b64encode(wav_for_whisper).decode('utf-8')
+                
+                # Send to remote service
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{REMOTE_WHISPER_URL}/transcribe",
+                        json={
+                            "audio_base64": wav_base64,
+                            "sample_rate": 16000,
+                            "language": "en"
+                        }
+                    )
+                    response.raise_for_status()
+                    remote_result = response.json()
+                
+                # Convert to OpenAI format
+                openai_resp = type('obj', (object,), {
+                    'text': remote_result.get('text', ''),
+                    'segments': []  # Remote service doesn't provide segments
+                })()
+                
+                resp = openai_resp
+                logger.info(f"Remote Whisper transcription completed for {call_sid} in {remote_result.get('transcription_time', 0):.2f}s")
+                
+            except Exception as e:
+                logger.error(f"Remote Whisper failed for {call_sid}: {e}")
+                resp = None
         
-        resp = client.audio.transcriptions.create(
-            model=TRANSCRIPTION_MODEL,
-            file=wav_file,
-            response_format="verbose_json",
-            language="en",
-            prompt=prompt
-        )
+        # Fallback to OpenAI Whisper
+        if not USE_LOCAL_WHISPER and not USE_REMOTE_WHISPER or resp is None:
+            logger.info(f"Using OpenAI Whisper {TRANSCRIPTION_MODEL} for {call_sid}")
+            wav_file = io.BytesIO(wav_for_whisper)
+            try:
+                wav_file.name = "speech.wav"  # Help the API infer format
+            except Exception:
+                pass
+            
+            # Enhanced prompt for better transcription quality
+            prompt = "Caller is describing a plumbing issue or asking a question. Focus on clear human speech and maintain natural conversation flow. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Preserve context and intent."
+            
+            resp = client.audio.transcriptions.create(
+                model=TRANSCRIPTION_MODEL,
+                file=wav_file,
+                response_format="verbose_json",
+                language="en",
+                prompt=prompt,
+                temperature=0.0  # Add temperature=0 for more consistent results
+            )
         
         transcription_duration = time.time() - start_time
         logger.info(f"Whisper transcription completed for {call_sid} in {transcription_duration:.2f}s")
@@ -1826,22 +1975,56 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
         # Keep in QA mode and resume stream
         def append_stream_and_pause_local(resp: VoiceResponse):
             start = Start()
-            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
-            if ws_base:
-                wss_url_local = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-            else:
-                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                    wss_url_local = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                    wss_url_local = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                else:
-                    wss_url_local = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            wss_url_local = _build_wss_url_for_resume(call_sid)
             start.stream(url=wss_url_local, track="inbound_track")
             resp.append(start)
             resp.pause(length=3600)
         append_stream_and_pause_local(twiml)
         await push_twiml_to_call(call_sid, twiml)
         return
+
+    # Name collection handling
+    if dialog and dialog.get('step') == 'awaiting_name':
+        # Extract name from user response
+        customer_name = extract_name_from_text(text)
+        if customer_name:
+            # Store the name and acknowledge it
+            dialog['customer_name'] = customer_name
+            # Update dialog state to continue with normal flow
+            dialog['step'] = 'name_collected'
+            call_dialog_state[call_sid] = dialog
+            
+            twiml = VoiceResponse()
+            await add_tts_or_say_to_twiml(
+                twiml, 
+                call_sid, 
+                f"Nice to meet you, {customer_name}. If at any point you'd like to speak to a human dispatcher, just say 'transfer'. What can we assist you with today?"
+            )
+            # Resume streaming to listen for their plumbing issue
+            start = Start()
+            wss_url = _build_wss_url_for_resume(call_sid)
+            start.stream(url=wss_url, track="inbound_track")
+            twiml.append(start)
+            twiml.pause(length=3600)
+            await push_twiml_to_call(call_sid, twiml)
+            logger.info(f"👤 Collected name '{customer_name}' for {call_sid}")
+            return
+        else:
+            # Couldn't extract a clear name, ask again
+            twiml = VoiceResponse()
+            await add_tts_or_say_to_twiml(
+                twiml, 
+                call_sid, 
+                "I didn't catch your name clearly. Could you please tell me your name?"
+            )
+            # Keep the same dialog state and resume streaming
+            start = Start()
+            wss_url = _build_wss_url_for_resume(call_sid)
+            start.stream(url=wss_url, track="inbound_track")
+            twiml.append(start)
+            twiml.pause(length=3600)
+            await push_twiml_to_call(call_sid, twiml)
+            return
 
     # Transfer confirmation handling
     if dialog and dialog.get('step') == 'awaiting_transfer_confirm':
@@ -1873,16 +2056,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             reset_unclear_attempts(call_sid)
             # Resume streaming to listen for their response
             start = Start()
-            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
-            if ws_base:
-                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-            else:
-                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                else:
-                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            wss_url = _build_wss_url_for_resume(call_sid)
             start.stream(url=wss_url, track="inbound_track")
             twiml.append(start)
             twiml.pause(length=3600)
@@ -1895,16 +2069,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             await add_tts_or_say_to_twiml(twiml, call_sid, "I didn't catch that. Should I transfer you to a representative? Please say yes or no.")
             # Keep the same dialog state
             start = Start()
-            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
-            if ws_base:
-                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-            else:
-                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                else:
-                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            wss_url = _build_wss_url_for_resume(call_sid)
             start.stream(url=wss_url, track="inbound_track")
             twiml.append(start)
             twiml.pause(length=3600)
@@ -1936,12 +2101,18 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
         explicit_emergency = contains_emergency_keywords(text)
     
     # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
+    # But skip deferring if we've already collected their name and this is their first plumbing issue description
     info = call_info_store.get(call_sid, {})
     segments_count = int(info.get('segments_count', 0)) + 1
     info['segments_count'] = segments_count
     call_info_store[call_sid] = info
     
-    if segments_count < 2 and not explicit_time and not explicit_emergency and not is_affirmative_response(text):
+    # Check if we've collected name - if so, proceed directly with intent handling
+    dialog = call_dialog_state.get(call_sid, {})
+    name_collected = dialog.get('step') == 'name_collected' or dialog.get('customer_name')
+    
+    if (segments_count < 2 and not explicit_time and not explicit_emergency and 
+        not is_affirmative_response(text) and not name_collected):
         call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
         logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
         return
@@ -2053,6 +2224,14 @@ def validate_and_enhance_extraction(args: dict, original_text: str, call_sid: st
         if phone:
             args['customer'] = args.get('customer', {})
             args['customer']['phone'] = phone
+    
+    # Include collected customer name from dialog state
+    if call_sid:
+        dialog = call_dialog_state.get(call_sid, {})
+        customer_name = dialog.get('customer_name')
+        if customer_name and not args.get('customer', {}).get('name'):
+            args['customer'] = args.get('customer', {})
+            args['customer']['name'] = customer_name
     
     # Enhance address extraction
     if not args.get('location', {}).get('raw_address'):
@@ -2170,8 +2349,90 @@ async def _deactivate_speech_gate_after_delay(call_sid: str, delay: float):
     except Exception as e:
         logger.error(f"Failed to deactivate speech gate for {call_sid}: {e}")
 
+def get_natural_conversation_starter(text: str, dialog: dict, call_sid: str) -> str:
+    """
+    Choose natural conversation starters based on context to make responses less robotic.
+    Returns appropriate phrases like 'Thanks', 'Sounds good', 'OK', etc.
+    """
+    text_lower = text.lower()
+    current_step = dialog.get('step', '')
+    
+    # Get conversation context
+    info = call_info_store.get(call_sid, {})
+    segments_count = info.get('segments_count', 0)
+    
+    # Confirmation and booking contexts
+    if any(phrase in text_lower for phrase in ['do you want this time', 'please say yes or no', 'confirm']):
+        return "Alright"
+    
+    # Time-related responses
+    if any(phrase in text_lower for phrase in ['i can schedule', 'available', 'earliest', 'time looks busy']):
+        return "OK"
+    
+    # After user provides information (booking details, preferences, etc.)
+    if current_step in ['awaiting_time_confirm', 'awaiting_location_confirm'] or segments_count > 1:
+        starters = ["Thanks", "Sounds good", "Got it", "Perfect"]
+        # Simple rotation based on call activity to add variety
+        import time
+        starter_index = int(time.time() // 10) % len(starters)  # Changes every 10 seconds
+        return starters[starter_index]
+    
+    # Problem-solving and clarification contexts
+    if any(phrase in text_lower for phrase in ['what exactly', 'could you', 'tell me', 'what can we assist']):
+        return "Alright"
+    
+    # Error recovery and re-prompting
+    if any(phrase in text_lower for phrase in ["didn't catch", "sorry", "trouble understanding"]):
+        return "OK"
+    
+    # Transfer and handoff contexts
+    if any(phrase in text_lower for phrase in ['would you like me to transfer', 'connect you']):
+        return "Alright"
+    
+    # Positive acknowledgments
+    if any(phrase in text_lower for phrase in ['great', 'perfect', 'excellent']):
+        return "Sounds good"
+    
+    # Follow-up questions and continued conversation
+    if any(phrase in text_lower for phrase in ['what date', 'which time', 'any other', 'anything else']):
+        return "OK"
+    
+    # Default starters for general responses - rotate for variety
+    if segments_count > 0:  # Only after initial exchange
+        default_starters = ["Alright", "OK", "Thanks"]
+        import time
+        starter_index = int(time.time() // 15) % len(default_starters)  # Changes every 15 seconds
+        return default_starters[starter_index]
+    
+    # Return empty string for initial responses or when no starter is appropriate
+    return ""
+
 async def add_tts_or_say_to_twiml(target, call_sid: str, text: str):
-    speak_text = text.replace("_", " ")
+    # Get customer name from dialog state and prepend it to most messages
+    dialog = call_dialog_state.get(call_sid, {})
+    customer_name = dialog.get('customer_name')
+    
+    # Don't add name to certain types of messages
+    skip_name_prefixes = [
+        "hello", "who do i have", "i didn't catch your name", "connecting you", 
+        "thanks for trusting", "thank you for calling", "goodbye", "bye",
+        "nice to meet you"
+    ]
+    
+    # Check if this message should skip name prefixing
+    should_skip_name = any(text.lower().startswith(prefix) for prefix in skip_name_prefixes)
+    
+    # Prepend name if available and appropriate with natural conversation starters
+    if customer_name and not should_skip_name and dialog.get('step') != 'awaiting_name':
+        # Choose natural conversation starter based on context
+        conversation_starters = get_natural_conversation_starter(text, dialog, call_sid)
+        if conversation_starters:
+            speak_text = f"{conversation_starters}, {customer_name}, {text}".replace("_", " ")
+        else:
+            speak_text = f"{customer_name}, {text}".replace("_", " ")
+    else:
+        speak_text = text.replace("_", " ")
+    
     preview = speak_text if len(speak_text) <= 200 else speak_text[:200] + "..."
     
     # Activate speech gate when bot starts speaking
@@ -2234,6 +2495,38 @@ async def push_twiml_to_call(call_sid: str, response: VoiceResponse):
              logger.info(f"Pushed TwiML via URL to call {call_sid}; status={getattr(result, 'status', 'unknown')} url={url}")
          except Exception as e2:
              logger.error(f"URL fallback also failed for call {call_sid}: {e2}")
+
+def extract_name_from_text(text: str) -> str:
+    """Extract customer name from text response"""
+    import re
+    
+    # Normalize and clean the text
+    text = text.strip().lower()
+    
+    # Common name introduction patterns
+    name_patterns = [
+        r"(?:my name is|i'm|i am|this is|it's|it is|call me)\s+([a-zA-Z][a-zA-Z\s]+)",
+        r"^([a-zA-Z][a-zA-Z\s]+?)(?:\s+here|$)",  # Simple name at start
+        r"([a-zA-Z][a-zA-Z\s]+)",  # Any sequence of letters as fallback
+    ]
+    
+    for pattern in name_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            name = match.group(1).strip().title()
+            # Filter out common non-name words
+            skip_words = {
+                'hello', 'hi', 'hey', 'good', 'morning', 'afternoon', 'evening', 
+                'yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'calling', 'about',
+                'speaking', 'here', 'with', 'you', 'the', 'a', 'an', 'and'
+            }
+            # Only return if it's not in skip words and has reasonable length
+            if (name.lower() not in skip_words and 
+                len(name) >= 2 and len(name) <= 50 and 
+                not any(char.isdigit() for char in name)):
+                return name
+    
+    return None
 
 def extract_phone_number(text: str) -> str:
     """Extract phone number from text"""
@@ -2861,16 +3154,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
     # Helper: append stream-and-pause so audio resumes streaming after we speak
     def append_stream_and_pause(resp: VoiceResponse):
         start = Start()
-        ws_base = call_info_store.get(call_sid, {}).get('ws_base')
-        if ws_base:
-            wss_url_local = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-        else:
-            if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                wss_url_local = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-            elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                wss_url_local = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-            else:
-                wss_url_local = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+        wss_url_local = _build_wss_url_for_resume(call_sid)
         start.stream(url=wss_url_local, track="inbound_track")
         resp.append(start)
         resp.pause(length=3600)
@@ -3227,16 +3511,7 @@ async def streaming_watchdog(call_sid: str, delay_seconds: float = 5.0):
             logger.info(f"🛡️ Watchdog: no media received for {call_sid} after {delay_seconds:.0f}s; re-pushing TwiML to restart streaming")
             resp = VoiceResponse()
             start = Start()
-            ws_base = info.get('ws_base')
-            if ws_base:
-                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-            else:
-                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                else:
-                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            wss_url = _build_wss_url_for_resume(call_sid)
             start.stream(url=wss_url, track="inbound_track")
             resp.append(start)
             resp.pause(length=3600)
@@ -3472,16 +3747,7 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
             await add_tts_or_say_to_twiml(twiml, call_sid, "I didn't catch that. Should I transfer you to a representative? Please say yes or no.")
             # Keep the same dialog state and resume streaming
             start = Start()
-            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
-            if ws_base:
-                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-            else:
-                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                else:
-                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+            wss_url = _build_wss_url_for_resume(call_sid)
             start.stream(url=wss_url, track="inbound_track")
             twiml.append(start)
             twiml.pause(length=3600)
@@ -3550,16 +3816,7 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
                 call_dialog_state[call_sid] = {'step': 'awaiting_transfer_confirm'}
                 # Resume streaming to listen for yes/no response
                 start = Start()
-                ws_base = call_info_store.get(call_sid, {}).get('ws_base')
-                if ws_base:
-                    wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-                else:
-                    if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                        wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                    elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                        wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                    else:
-                        wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
+                wss_url = _build_wss_url_for_resume(call_sid)
                 start.stream(url=wss_url, track="inbound_track")
                 twiml.append(start)
                 twiml.pause(length=3600)
