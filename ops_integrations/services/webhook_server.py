@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv('../.env')
 
 # Import our SMS adapter
-from adapters.sms import SMSAdapter
+from adapters.external_services.sms import SMSAdapter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

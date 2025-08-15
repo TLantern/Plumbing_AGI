@@ -28,9 +28,9 @@ class Customer(BaseModel):
 #     supplier: str
 #     van_location: Optional[str]
 
-# class Job(BaseModel):
-#     id: str
-#     customer_id: str
-#     type: str
-#     scheduled_time: Optional[str]
-#     tech_id: Optional[str]
+class Job(BaseModel):
+    id: str
+    customer_id: str
+    type: str
+    scheduled_time: Optional[str]
+    tech_id: Optional[str]

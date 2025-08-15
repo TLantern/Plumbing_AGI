@@ -5,10 +5,17 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
 from dotenv import load_dotenv
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from models import Customer
+# Replace direct relative imports with dual-mode imports (package + script fallback)
+try:
+    from ops_integrations.core.models import Customer
+except Exception:
+    import sys as _sys
+    import os as _os
+    _CURRENT_DIR = _os.path.dirname(__file__)
+    _OPS_ROOT = _os.path.abspath(_os.path.join(_CURRENT_DIR, '..', '..'))
+    if _OPS_ROOT not in _sys.path:
+        _sys.path.insert(0, _OPS_ROOT)
+    from ops_integrations.core.models import Customer
 
 # Load environment variables
 load_dotenv()

@@ -10,15 +10,15 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from jose.exceptions import ExpiredSignatureError
 
-from .logging_conf import configure_json_logging
-from .models import LocationIn, TokenOut
-from .security import (
+from logging_conf import configure_json_logging
+from models import LocationIn, TokenOut
+from security import (
     LOCATION_WRITE_SCOPE,
     mint_location_token,
     remaining_ttl_seconds,
     verify_token,
 )
-from .storage import (
+from storage import (
     get_location_for_sid,
     mark_jti_used,
     save_location_for_sid,

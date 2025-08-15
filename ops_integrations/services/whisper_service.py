@@ -9,7 +9,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import whisper
 import torch
 import numpy as np
 import io
@@ -18,6 +17,13 @@ import logging
 import time
 from pydantic import BaseModel
 from typing import Optional
+
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+    whisper = None
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -37,20 +43,28 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for FastAPI."""
     # Startup
     global model
-    logger.info(f"Loading Whisper model '{WHISPER_MODEL}' on device '{DEVICE}'...")
-    start_time = time.time()
-    model = whisper.load_model(WHISPER_MODEL, device=DEVICE)
-    load_time = time.time() - start_time
-    logger.info(f"Whisper model loaded in {load_time:.2f}s")
-    
-    # Test transcription to warm up
-    logger.info("Warming up model with test audio...")
-    test_audio = np.zeros(16000, dtype=np.float32)  # 1 second of silence
-    try:
-        model.transcribe(test_audio, language="en", fp16=DEVICE=="cuda")
-        logger.info("Model warmed up successfully")
-    except Exception as e:
-        logger.warning(f"Model warmup failed: {e}")
+    if not WHISPER_AVAILABLE:
+        logger.error("Whisper not available - service will not function properly")
+        model = None
+    else:
+        logger.info(f"Loading Whisper model '{WHISPER_MODEL}' on device '{DEVICE}'...")
+        start_time = time.time()
+        try:
+            model = whisper.load_model(WHISPER_MODEL, device=DEVICE)
+            load_time = time.time() - start_time
+            logger.info(f"Whisper model loaded in {load_time:.2f}s")
+            
+            # Test transcription to warm up
+            logger.info("Warming up model with test audio...")
+            test_audio = np.zeros(16000, dtype=np.float32)  # 1 second of silence
+            try:
+                model.transcribe(test_audio, language="en", fp16=DEVICE=="cuda")
+                logger.info("Model warmed up successfully")
+            except Exception as e:
+                logger.warning(f"Model warmup failed: {e}")
+        except Exception as e:
+            logger.error(f"Failed to load Whisper model: {e}")
+            model = None
     
     yield
     
@@ -85,8 +99,9 @@ class TranscriptionResponse(BaseModel):
 async def health_check():
     """Health check endpoint."""
     return {
-        "status": "healthy",
-        "model": WHISPER_MODEL,
+        "status": "healthy" if WHISPER_AVAILABLE and model is not None else "degraded",
+        "whisper_available": WHISPER_AVAILABLE,
+        "model": WHISPER_MODEL if WHISPER_AVAILABLE else None,
         "device": DEVICE,
         "cuda_available": torch.cuda.is_available()
     }

@@ -25,8 +25,8 @@ try:
         infer_job_type_from_text,
         infer_multiple_job_types_from_text,
     )
-    from ..job_booking import book_emergency_job, book_scheduled_job
-    from .google_calendar import CalendarAdapter
+    from core.job_booking import book_emergency_job, book_scheduled_job
+    from adapters.external_services.google_calendar import CalendarAdapter
 except Exception:
     import sys as _sys
     import os as _os
@@ -34,13 +34,13 @@ except Exception:
     _OPS_ROOT = _os.path.abspath(_os.path.join(_CURRENT_DIR, '..'))
     if _OPS_ROOT not in _sys.path:
         _sys.path.insert(0, _OPS_ROOT)
-    from plumbing_services import (
+    from services.plumbing_services import (
         get_function_definition,
         infer_job_type_from_text,
         infer_multiple_job_types_from_text,
     )
-    from job_booking import book_emergency_job, book_scheduled_job
-    from google_calendar import CalendarAdapter
+    from core.job_booking import book_emergency_job, book_scheduled_job
+    from adapters.external_services.google_calendar import CalendarAdapter
 from datetime import datetime, timedelta, timezone
 try:
     import webrtcvad  # type: ignore
@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     OPENAI_TTS_SPEED: float = 1.25  # Increased from 1.0 for faster responses (0.25 to 4.0)
     SPEECH_GATE_BUFFER_SEC: float = 1.0  # Buffer time added to TTS duration for speech gate
     # Confidence Thresholds
-    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -0.6  # Increased from -0.8 - stricter transcription quality (-1.0 = normal, -0.5 = stricter)
+    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -0.7  # Relaxed from -0.6 - allow more transcriptions through (-1.0 = normal, -0.5 = stricter)
     INTENT_CONFIDENCE_THRESHOLD: float = 0.5  # Increased from 0.4 - higher intent confidence requirement
     OVERALL_CONFIDENCE_THRESHOLD: float = 0.6  # Increased from 0.5 - higher overall confidence requirement
     CONFIDENCE_DEBUG_MODE: bool = True  # Enable detailed confidence logging
@@ -117,7 +117,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://5b414375c4a8.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = "https://8224a1a4accc.ngrok-free.app"  # Replace with your ngrok URL
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
@@ -129,9 +129,9 @@ VAD_AGGRESSIVENESS = 2  # Reduced from 3 - less aggressive filtering for better 
 VAD_FRAME_DURATION_MS = 30  # Increased from 20ms - better accuracy for voice detection
 SILENCE_TIMEOUT_SEC = 2.0  # Increased from 1.5s - allow longer natural pauses
 MIN_SPEECH_DURATION_SEC = 0.5  # Increased from 0.3s - filter out brief noise
-CHUNK_DURATION_SEC = 3.0  # Increased from 2.0s - more context for processing
+CHUNK_DURATION_SEC = 2.0  # Increased from 2.0s - more context for processing
 PREROLL_IGNORE_SEC = 0.5  # Increased from 0.4s - better initial speech detection
-MIN_START_RMS = 100  # Reduced from 130 - more sensitive to quiet speech
+MIN_START_RMS = 120  # Reduced from 130 - more sensitive to quiet speech
 FAST_RESPONSE_MODE = False  # Disabled for better quality over speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
@@ -397,7 +397,7 @@ async def classify_transcript_intent(text: str) -> tuple[str, float]:
             return "GENERAL_INQUIRY", 0.2
         
         # Validate that the intent is one we recognize
-        from ops_integrations.flows.intents import get_intent_tags
+        from ..flows.intents import get_intent_tags
         valid_intents = get_intent_tags()
         if intent not in valid_intents:
             logger.debug(f"Unknown intent returned: {intent}, falling back to GENERAL_INQUIRY")
@@ -437,7 +437,7 @@ async def classify_transcript_intent(text: str) -> tuple[str, float]:
 async def _calculate_pattern_confidence_async(text: str) -> dict:
     """Async wrapper for pattern matching confidence calculation."""
     try:
-        from ops_integrations.flows.intents import load_intents
+        from ..flows.intents import load_intents
         intents_data = load_intents()
         return calculate_pattern_matching_confidence(text, intents_data)
     except Exception:
@@ -704,7 +704,7 @@ async def _send_magiclink_sms(call_sid: str) -> bool:
     sms_ok = False
     try:
         try:
-            from .sms import SMSAdapter  # type: ignore
+            from ..adapters.sms import SMSAdapter  # type: ignore
         except Exception:
             from adapters.sms import SMSAdapter  # type: ignore
         sms_adapter = SMSAdapter()
@@ -1053,9 +1053,9 @@ async def _finalize_booking_if_ready(call_sid: str) -> bool:
         )
         # Sync booking to Google Sheets (mock or live)
         try:
-            from .sheets import GoogleSheetsCRM  # type: ignore
+            from ..adapters.sheets import GoogleSheetsCRM  # type: ignore
         except Exception:
-            from ops_integrations.adapters.sheets import GoogleSheetsCRM  # type: ignore
+            from adapters.sheets import GoogleSheetsCRM  # type: ignore
         sheets = GoogleSheetsCRM()
         appt_iso = suggested_time.isoformat()
         if not appt_iso.endswith('Z') and '+' not in appt_iso:
@@ -1700,15 +1700,19 @@ async def process_audio(call_sid: str, audio: bytes):
     try:
         fallback_bytes = len(vad_state['fallback_buffer'])
         last_vad_process = vad_state.get('last_vad_process_time', 0)
+        last_chunk_time = vad_state.get('last_chunk_time', 0)
         time_since_vad = current_time - last_vad_process
+        time_since_chunk = current_time - last_chunk_time
         
         # Only trigger fallback if:
         # 1. Not currently speaking
         # 2. Have enough audio buffered
         # 3. Haven't processed via VAD recently (prevent double processing)
+        # 4. Haven't processed via fallback recently (prevent excessive processing)
         if (not vad_state['is_speaking'] and 
             fallback_bytes >= int(sample_rate * SAMPLE_WIDTH * CHUNK_DURATION_SEC) and
-            time_since_vad > 2.0):  # Wait 2 seconds after VAD processing
+            time_since_vad > 3.0 and  # Increased from 2.0 - wait longer after VAD processing
+            time_since_chunk > 5.0):  # Wait at least 5 seconds between fallback processes
             logger.info(f"⏱️ Time-based fallback flush for {call_sid}: {fallback_bytes} bytes (~{CHUNK_DURATION_SEC}s)")
             await process_speech_segment(call_sid, vad_state['fallback_buffer'])
             vad_state['fallback_buffer'] = bytearray()
@@ -1722,32 +1726,51 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
     audio_duration_ms = len(audio_data) / (sample_rate * SAMPLE_WIDTH) * 1000
     logger.info(f"Processing speech segment for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms duration")
     
+    # Audio fingerprinting to prevent processing the same audio multiple times
+    try:
+        import hashlib
+        audio_hash = hashlib.md5(bytes(audio_data)).hexdigest()[:8]  # First 8 chars of hash
+        info = call_info_store.get(call_sid, {})
+        last_audio_hash = info.get('last_audio_hash')
+        last_audio_ts = info.get('last_audio_ts', 0)
+        now_ts = time.time()
+        
+        if last_audio_hash == audio_hash and (now_ts - last_audio_ts) < 30:
+            logger.info(f"Suppressing duplicate audio segment for {call_sid} (hash: {audio_hash})")
+            return
+        
+        info['last_audio_hash'] = audio_hash
+        info['last_audio_ts'] = now_ts
+        call_info_store[call_sid] = info
+    except Exception as e:
+        logger.debug(f"Audio fingerprinting failed for {call_sid}: {e}")
+    
     # Quality-focused processing - require longer segments for better accuracy
-    min_duration_ms = 400  # Increased from 200/300 - require longer segments for better quality
+    min_duration_ms = 500  # Increased from 400 - require longer segments for better quality
     min_bytes = sample_rate * SAMPLE_WIDTH * (min_duration_ms / 1000)
     
     if len(audio_data) < min_bytes:
         logger.warning(f"Speech segment too short for {call_sid} ({audio_duration_ms:.0f}ms < {min_duration_ms}ms), skipping Whisper processing")
         return
 
-            # Energy gate to drop very low-energy segments (likely noise/line tones)
-        try:
-            if _audioop is not None:
-                rms = _audioop.rms(bytes(audio_data), 2)
+    # Energy gate to drop very low-energy segments (likely noise/line tones)
+    try:
+        if _audioop is not None:
+            rms = _audioop.rms(bytes(audio_data), 2)
+        else:
+            # Fallback simple RMS
+            import array
+            arr = array.array('h', audio_data)
+            if len(arr) == 0:
+                rms = 0
             else:
-                # Fallback simple RMS
-                import array
-                arr = array.array('h', audio_data)
-                if len(arr) == 0:
-                    rms = 0
-                else:
-                    rms = int((sum(x*x for x in arr) / len(arr)) ** 0.5)
-            if rms < 60:  # Reduced from 80 - more sensitive to quiet speech
-                logger.info(f"Skipping low-energy segment for {call_sid} (RMS={rms})")
-                return
-        except Exception as e:
-            logger.debug(f"RMS calc failed for {call_sid}: {e}")
-    
+                rms = int((sum(x*x for x in arr) / len(arr)) ** 0.5)
+        if rms < 60:  # Reduced from 80 - more sensitive to quiet speech
+            logger.info(f"Skipping low-energy segment for {call_sid} (RMS={rms})")
+            return
+    except Exception as e:
+        logger.debug(f"RMS calc failed for {call_sid}: {e}")
+
     try:
         logger.debug(f"Converting PCM16 to WAV for {call_sid} ({len(audio_data)} bytes) @ {sample_rate} Hz")
         wav_bytes = pcm_to_wav_bytes(bytes(audio_data), sample_rate)
@@ -1763,51 +1786,12 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             logger.debug(f"Resampled audio for Whisper from {sample_rate} Hz to {target_rate} Hz")
         
         logger.info(f"Sending audio to Whisper for {call_sid}")
-        start_time = time.time()
         
-        # Try local Whisper first if enabled
-        if USE_LOCAL_WHISPER:
-            try:
-                from .local_whisper import transcribe_with_local_whisper
-                
-                # Convert WAV to PCM16 bytes for local Whisper
-                wav_io = io.BytesIO(wav_for_whisper)
-                with wave.open(wav_io, 'rb') as wav_file:
-                    # Read PCM data
-                    pcm_data = wav_file.readframes(wav_file.getnframes())
-                    sample_rate = wav_file.getframerate()
-                
-                logger.info(f"Using local Whisper base for {call_sid}")
-                resp = transcribe_with_local_whisper(
-                    audio_data=pcm_data,
-                    sample_rate=sample_rate,
-                    language="en",
-                    model_name="base"
-                )
-                
-                # Convert local Whisper response to OpenAI format for compatibility
-                openai_resp = type('obj', (object,), {
-                    'text': resp.get('text', ''),
-                    'segments': resp.get('segments', [])
-                })()
-                
-                # Add avg_logprob to segments for confidence calculation
-                for segment in openai_resp.segments:
-                    if 'avg_logprob' not in segment:
-                        segment['avg_logprob'] = -0.5  # Default confidence
-                
-                resp = openai_resp
-                logger.info(f"Local Whisper transcription completed for {call_sid}")
-                
-            except ImportError:
-                logger.warning("Local Whisper not available, falling back to OpenAI Whisper")
-                resp = None
-            except Exception as e:
-                logger.error(f"Local Whisper failed for {call_sid}: {e}, falling back to OpenAI")
-                resp = None
+        # Optimized service selection - use fastest service first
+        resp = None
         
-        # Try remote Whisper service
-        if USE_REMOTE_WHISPER and (not USE_LOCAL_WHISPER or resp is None):
+        # Try remote Whisper first (fastest, ~0.4s)
+        if USE_REMOTE_WHISPER:
             try:
                 import base64
                 import httpx
@@ -1815,9 +1799,10 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
                 # Convert WAV to base64
                 wav_base64 = base64.b64encode(wav_for_whisper).decode('utf-8')
                 
-                # Send to remote service
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
+                # Send to remote service with shorter timeout
+                start_time = time.time()
+                async with httpx.AsyncClient(timeout=5.0) as http_client:  # Reduced from 30s to 5s
+                    response = await http_client.post(
                         f"{REMOTE_WHISPER_URL}/transcribe",
                         json={
                             "audio_base64": wav_base64,
@@ -1827,6 +1812,7 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
                     )
                     response.raise_for_status()
                     remote_result = response.json()
+                transcription_duration = time.time() - start_time
                 
                 # Convert to OpenAI format
                 openai_resp = type('obj', (object,), {
@@ -1835,14 +1821,14 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
                 })()
                 
                 resp = openai_resp
-                logger.info(f"Remote Whisper transcription completed for {call_sid} in {remote_result.get('transcription_time', 0):.2f}s")
+                logger.info(f"Remote Whisper transcription completed for {call_sid} in {transcription_duration:.2f}s")
                 
             except Exception as e:
-                logger.error(f"Remote Whisper failed for {call_sid}: {e}")
+                logger.debug(f"Remote Whisper failed for {call_sid}: {e}")
                 resp = None
         
-        # Fallback to OpenAI Whisper
-        if not USE_LOCAL_WHISPER and not USE_REMOTE_WHISPER or resp is None:
+        # Fallback to OpenAI Whisper (slower but reliable)
+        if resp is None:
             logger.info(f"Using OpenAI Whisper {TRANSCRIPTION_MODEL} for {call_sid}")
             wav_file = io.BytesIO(wav_for_whisper)
             try:
@@ -1850,30 +1836,27 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             except Exception:
                 pass
             
-            # Enhanced prompt for better transcription quality
-            prompt = "Caller is describing a plumbing issue or asking a question. Focus on clear human speech and maintain natural conversation flow. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Preserve context and intent."
+            # Simplified prompt for faster processing
+            prompt = "Caller describing plumbing issue. Focus on clear speech."
             
+            start_time = time.time()
             resp = client.audio.transcriptions.create(
                 model=TRANSCRIPTION_MODEL,
                 file=wav_file,
                 response_format="verbose_json",
                 language="en",
                 prompt=prompt,
-                temperature=0.0  # Add temperature=0 for more consistent results
+                temperature=0.0
             )
-        
-        transcription_duration = time.time() - start_time
-        logger.info(f"Whisper transcription completed for {call_sid} in {transcription_duration:.2f}s")
+            transcription_duration = time.time() - start_time
+            logger.info(f"OpenAI Whisper transcription completed for {call_sid} in {transcription_duration:.2f}s")
         
         text = (resp.text or "").strip()
         
-        # Clean and filter transcription for unwanted content and repetitions
-        cleaned_text, should_suppress_due_to_content = clean_and_filter_transcription(text)
-        if should_suppress_due_to_content:
+        # Basic text cleaning (simplified for speed)
+        text = text.strip()
+        if not text:
             return
-        
-        # Use cleaned text for further processing
-        text = cleaned_text
         
         # Confidence/quality gating using segments avg_logprob
         avg_logprobs = []
@@ -1926,21 +1909,45 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             return
         
         logger.info(f'🎤 USER SPEECH ({call_sid}): "{text}" [duration: {audio_duration_ms:.0f}ms, transcription_time: {transcription_duration:.2f}s, avg_logprob: {mean_lp}]')
-        # Suppress duplicate transcripts within a short window to avoid repeated prompts
+        
+        # Additional filtering for very short or low-confidence transcriptions
+        if len(text.strip()) <= 2 and mean_lp is not None and mean_lp < -0.8:
+            logger.info(f"Suppressing very short low-confidence transcript for {call_sid}: '{text}' (length={len(text)}, confidence={mean_lp:.3f})")
+            return
+        
+        # Suppress common noise patterns
+        noise_patterns = [
+            r'^\s*[.,!?;:]\s*$',  # Just punctuation
+            r'^\s*[aeiou]\s*$',   # Just a single vowel
+            r'^\s*[bcdfghjklmnpqrstvwxyz]\s*$',  # Just a single consonant
+            r'^\s*[0-9]\s*$',     # Just a single digit
+            r'^\s*[^\w\s]\s*$',   # Just a single special character
+        ]
+        import re
+        for pattern in noise_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                logger.info(f"Suppressing noise pattern transcript for {call_sid}: '{text}'")
+                return
+        
+        # Simple duplicate detection (simplified for speed)
         try:
             normalized_text = " ".join(text.lower().split())
             info = call_info_store.get(call_sid, {})
             prev_text = info.get('asr_last_text')
             prev_ts = info.get('asr_last_ts', 0)
             now_ts = time.time()
+            
+            # Check for exact duplicates within 10 seconds (reduced from 30)
             if prev_text == normalized_text and (now_ts - prev_ts) < 10:
                 logger.info(f"Suppressing duplicate transcript for {call_sid}: '{text}'")
                 return
+            
+            # Update tracking
             info['asr_last_text'] = normalized_text
             info['asr_last_ts'] = now_ts
             call_info_store[call_sid] = info
         except Exception as e:
-            logger.debug(f"Duplicate transcript guard failed for {call_sid}: {e}")
+            logger.debug(f"Duplicate check failed for {call_sid}: {e}")
 
         # Broadcast real-time transcript to ops dashboard
         try:
@@ -3206,7 +3213,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             
             # Try to extract intent from the clarified response
             try:
-                from ops_integrations.flows.intents import extract_plumbing_intent
+                from ..flows.intents import extract_plumbing_intent
                 new_intent = await extract_plumbing_intent(followup_text)
                 
                 # Check if we now have a clearer intent
@@ -3781,7 +3788,7 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
         last_ts = float(info.get("last_followup_ts") or 0)
         now_ts = time.time()
         norm = " ".join((followup_text or "").lower().strip().split())
-        if last_norm == norm and (now_ts - last_ts) < 7.0:
+        if last_norm == norm and (now_ts - last_ts) < 30.0:
             logger.info(f"Debounced duplicate follow-up for {call_sid}: '{followup_text}'")
             # Re-prompt gently but do not increment attempts
             await ask_for_specifics(twiml, call_sid)
@@ -3794,7 +3801,7 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
 
     # 2) Try to extract intent again.
     try:
-        from ops_integrations.flows.intents import extract_plumbing_intent  # type: ignore
+        from ..flows.intents import extract_plumbing_intent  # type: ignore
         new_intent = await extract_plumbing_intent(followup_text)
     except Exception as e:
         logger.error(f"Re-extract intent failed for {call_sid}: {e}")

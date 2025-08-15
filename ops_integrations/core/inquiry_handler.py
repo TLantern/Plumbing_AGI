@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-from ops_integrations.adapters.crm import CRMAdapter
+from ..adapters.integrations.crm import CRMAdapter
 
 logging.basicConfig(level=logging.INFO)
 

@@ -22,4 +22,6 @@ Flask==2.3.3
 fastapi>=0.100
 uvicorn>=0.20
 websockets>=11.0
+webrtcvad>=2.0
+openai-whisper>=20250625
 

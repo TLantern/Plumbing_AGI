@@ -4,8 +4,14 @@ import time
 import struct
 from typing import Optional, Dict, Any, Callable
 from collections import defaultdict
-import webrtcvad
 import httpx
+
+try:
+    import webrtcvad
+    WEBRTCVAD_AVAILABLE = True
+except ImportError:
+    WEBRTCVAD_AVAILABLE = False
+    webrtcvad = None
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +24,20 @@ class AudioProcessor:
         self.frame_size = int(sample_rate * frame_duration_ms / 1000)
         
         # Initialize VAD
-        try:
-            self.vad = webrtcvad.Vad(2)  # Aggressiveness level 2
-        except Exception:
-            # Fallback to dummy VAD if webrtcvad is not available
-            class DummyVAD:
-                def is_speech(self, frame_bytes: bytes, sample_rate: int) -> bool:
-                    return False
-            self.vad = DummyVAD()
+        if WEBRTCVAD_AVAILABLE:
+            try:
+                self.vad = webrtcvad.Vad(2)  # Aggressiveness level 2
+            except Exception:
+                self.vad = self._create_dummy_vad()
+        else:
+            self.vad = self._create_dummy_vad()
+    
+    def _create_dummy_vad(self):
+        """Create a dummy VAD for when webrtcvad is not available"""
+        class DummyVAD:
+            def is_speech(self, frame_bytes: bytes, sample_rate: int) -> bool:
+                return False
+        return DummyVAD()
         
         # Audio buffers per call
         self.audio_buffers: Dict[str, bytearray] = defaultdict(bytearray)

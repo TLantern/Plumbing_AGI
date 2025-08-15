@@ -5,9 +5,9 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from ops_integrations.adapters.calendar import CalendarAdapter
-from ops_integrations.adapters.crm import CRMAdapter
-from ops_integrations.adapters.inventory import InventoryAdapter
+from ops_integrations.adapters.external_services.google_calendar import CalendarAdapter
+from ops_integrations.adapters.integrations.crm import CRMAdapter
+from ops_integrations.adapters.integrations.inventory import InventoryAdapter
 
 logging.basicConfig(level=logging.INFO)
 
@@ -32,7 +32,7 @@ class OpsETLSync:
         
         # Initialize Akaunting adapter only if credentials are available
         try:
-            from ops_integrations.adapters.akaunting import AkauntingAdapter
+            from adapters.integrations.akaunting import AkauntingAdapter
             self.accounting = AkauntingAdapter()
             self.accounting_available = True
             logging.info("✅ Akaunting integration enabled")
@@ -118,7 +118,7 @@ class OpsETLSync:
             captured_customers = []
             
             for interaction in test_interactions:
-                from ops_integrations.adapters.crm import InteractionType
+                from adapters.integrations.crm import InteractionType
                 
                 interaction_type_map = {
                     "phone_inbound": InteractionType.PHONE_INBOUND,
@@ -232,7 +232,7 @@ class OpsETLSync:
                         logging.info("🔄 Testing customer sync from Akaunting to CRM...")
                         # Sync first customer as a test
                         test_customer = customers[0]
-                        from ops_integrations.adapters.crm import InteractionType
+                        from adapters.integrations.crm import InteractionType
                         
                         sync_result = self.crm.capture_customer_interaction(
                             phone=test_customer.phone,

@@ -18,7 +18,7 @@ sys.path.insert(0, project_root)
 # Load environment variables
 load_dotenv()
 
-from ops_integrations.adapters.crm import CRMAdapter, InteractionType
+from adapters.integrations.crm import CRMAdapter, InteractionType
 
 logging.basicConfig(level=logging.INFO)
 

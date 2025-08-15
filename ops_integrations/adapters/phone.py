@@ -18,29 +18,14 @@ import wave
 from openai import OpenAI
 from collections import defaultdict
 import re
-# Replace direct relative imports with dual-mode imports (package + script fallback)
-try:
-    from .plumbing_services import (
-        get_function_definition,
-        infer_job_type_from_text,
-        infer_multiple_job_types_from_text,
-    )
-    from ..job_booking import book_emergency_job, book_scheduled_job
-    from .google_calendar import CalendarAdapter
-except Exception:
-    import sys as _sys
-    import os as _os
-    _CURRENT_DIR = _os.path.dirname(__file__)
-    _OPS_ROOT = _os.path.abspath(_os.path.join(_CURRENT_DIR, '..'))
-    if _OPS_ROOT not in _sys.path:
-        _sys.path.insert(0, _OPS_ROOT)
-    from plumbing_services import (
-        get_function_definition,
-        infer_job_type_from_text,
-        infer_multiple_job_types_from_text,
-    )
-    from job_booking import book_emergency_job, book_scheduled_job
-    from google_calendar import CalendarAdapter
+# Import from the installed package
+from ops_integrations.services.plumbing_services import (
+    get_function_definition,
+    infer_job_type_from_text,
+    infer_multiple_job_types_from_text,
+)
+from ops_integrations.core.job_booking import book_emergency_job, book_scheduled_job 
+from ops_integrations.adapters.external_services.google_calendar import CalendarAdapter
 from datetime import datetime, timedelta, timezone
 try:
     import webrtcvad  # type: ignore
@@ -94,7 +79,7 @@ class Settings(BaseSettings):
     OPENAI_TTS_SPEED: float = 1.25  # Increased from 1.0 for faster responses (0.25 to 4.0)
     SPEECH_GATE_BUFFER_SEC: float = 1.0  # Buffer time added to TTS duration for speech gate
     # Confidence Thresholds
-    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -0.6  # Increased from -0.8 - stricter transcription quality (-1.0 = normal, -0.5 = stricter)
+    TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -0.7  # Optimized based on 99.75% accuracy test (-1.0 = normal, -0.5 = stricter)
     INTENT_CONFIDENCE_THRESHOLD: float = 0.5  # Increased from 0.4 - higher intent confidence requirement
     OVERALL_CONFIDENCE_THRESHOLD: float = 0.6  # Increased from 0.5 - higher overall confidence requirement
     CONFIDENCE_DEBUG_MODE: bool = True  # Enable detailed confidence logging
@@ -117,7 +102,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://4cbf70c9248c.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = "https://8224a1a4accc.ngrok-free.app"  # Replace with your ngrok URL
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
@@ -131,7 +116,7 @@ SILENCE_TIMEOUT_SEC = 2.0  # Increased from 1.5s - allow longer natural pauses
 MIN_SPEECH_DURATION_SEC = 0.5  # Increased from 0.3s - filter out brief noise
 CHUNK_DURATION_SEC = 3.0  # Increased from 2.0s - more context for processing
 PREROLL_IGNORE_SEC = 0.5  # Increased from 0.4s - better initial speech detection
-MIN_START_RMS = 100  # Reduced from 130 - more sensitive to quiet speech
+MIN_START_RMS = 120  # Reduced from 130 - more sensitive to quiet speech
 FAST_RESPONSE_MODE = False  # Disabled for better quality over speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
@@ -153,6 +138,7 @@ vad_states = defaultdict(lambda: {
     'bot_speaking': False,  # NEW: Track when bot is outputting TTS
     'bot_speech_start_time': 0,  # NEW: When bot started speaking
     'speech_gate_active': False,  # NEW: Gate to block user speech processing
+    'processing_lock': False,  # NEW: Prevent multiple simultaneous processing
 })
 
 # Per-call media format (encoding and sample rate)
@@ -397,7 +383,7 @@ async def classify_transcript_intent(text: str) -> tuple[str, float]:
             return "GENERAL_INQUIRY", 0.2
         
         # Validate that the intent is one we recognize
-        from ops_integrations.flows.intents import get_intent_tags
+        from ..flows.intents import get_intent_tags
         valid_intents = get_intent_tags()
         if intent not in valid_intents:
             logger.debug(f"Unknown intent returned: {intent}, falling back to GENERAL_INQUIRY")
@@ -437,7 +423,7 @@ async def classify_transcript_intent(text: str) -> tuple[str, float]:
 async def _calculate_pattern_confidence_async(text: str) -> dict:
     """Async wrapper for pattern matching confidence calculation."""
     try:
-        from ops_integrations.flows.intents import load_intents
+        from ..flows.intents import load_intents
         intents_data = load_intents()
         return calculate_pattern_matching_confidence(text, intents_data)
     except Exception:
@@ -704,7 +690,7 @@ async def _send_magiclink_sms(call_sid: str) -> bool:
     sms_ok = False
     try:
         try:
-            from .sms import SMSAdapter  # type: ignore
+            from ..adapters.sms import SMSAdapter  # type: ignore
         except Exception:
             from adapters.sms import SMSAdapter  # type: ignore
         sms_adapter = SMSAdapter()
@@ -872,9 +858,9 @@ async def ops_action_approve(request: Request):
         )
         # Sync to Google Sheets CRM (mock or live)
         try:
-            from .sheets import GoogleSheetsCRM  # type: ignore
+            from ..adapters.sheets import GoogleSheetsCRM  # type: ignore
         except Exception:
-            from ops_integrations.adapters.sheets import GoogleSheetsCRM  # type: ignore
+            from adapters.sheets import GoogleSheetsCRM  # type: ignore
         sheets = GoogleSheetsCRM()
         booking_row = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -1664,10 +1650,12 @@ async def process_audio(call_sid: str, audio: bytes):
                             # Valid speech segment, process it
                             logger.info(f"✅ Processing valid speech segment for {call_sid}")
                             await process_speech_segment(call_sid, vad_state['pending_audio'])
-                            # Clear fallback buffer too to avoid double-processing the same audio
+                            # Clear ALL buffers to prevent double-processing the same audio
                             vad_state['fallback_buffer'] = bytearray()
+                            audio_buffers[call_sid] = bytearray()
                             # Mark the time when we last processed via VAD to prevent immediate fallback
                             vad_state['last_vad_process_time'] = current_time
+                            vad_state['last_chunk_time'] = current_time  # Also update chunk time
                         else:
                             logger.warning(f"❌ Speech too short for {call_sid} ({speech_duration:.2f}s < {MIN_SPEECH_DURATION_SEC}s), discarding")
                         
@@ -1689,10 +1677,12 @@ async def process_audio(call_sid: str, audio: bytes):
         if speech_duration >= CHUNK_DURATION_SEC:
             logger.debug(f"Forcing processing due to max duration for {call_sid}")
             await process_speech_segment(call_sid, vad_state['pending_audio'])
-            # Clear fallback buffer too, since it contains the same recent audio
+            # Clear ALL buffers to prevent double-processing the same audio
             vad_state['fallback_buffer'] = bytearray()
+            audio_buffers[call_sid] = bytearray()
             # Mark the time when we processed via VAD to prevent immediate fallback
             vad_state['last_vad_process_time'] = current_time
+            vad_state['last_chunk_time'] = current_time  # Also update chunk time
             vad_state['is_speaking'] = False
             vad_state['pending_audio'] = bytearray()
 
@@ -1700,27 +1690,47 @@ async def process_audio(call_sid: str, audio: bytes):
     try:
         fallback_bytes = len(vad_state['fallback_buffer'])
         last_vad_process = vad_state.get('last_vad_process_time', 0)
+        last_chunk_time = vad_state.get('last_chunk_time', 0)
         time_since_vad = current_time - last_vad_process
+        time_since_chunk = current_time - last_chunk_time
         
         # Only trigger fallback if:
         # 1. Not currently speaking
         # 2. Have enough audio buffered
         # 3. Haven't processed via VAD recently (prevent double processing)
+        # 4. Haven't processed via fallback recently (prevent rapid re-processing)
         if (not vad_state['is_speaking'] and 
             fallback_bytes >= int(sample_rate * SAMPLE_WIDTH * CHUNK_DURATION_SEC) and
-            time_since_vad > 2.0):  # Wait 2 seconds after VAD processing
+            time_since_vad > 3.0 and  # Increased from 2.0 to 3.0 seconds
+            time_since_chunk > 3.0):  # Also check time since last fallback processing
             logger.info(f"⏱️ Time-based fallback flush for {call_sid}: {fallback_bytes} bytes (~{CHUNK_DURATION_SEC}s)")
             await process_speech_segment(call_sid, vad_state['fallback_buffer'])
             vad_state['fallback_buffer'] = bytearray()
             vad_state['last_chunk_time'] = current_time
+            # Also clear the main buffer to prevent overlap
+            audio_buffers[call_sid] = bytearray()
     except Exception as e:
         logger.debug(f"Time-based fallback flush error for {call_sid}: {e}")
 
 async def process_speech_segment(call_sid: str, audio_data: bytearray):
     """Process a detected speech segment"""
-    sample_rate = audio_config_store.get(call_sid, {}).get('sample_rate', SAMPLE_RATE_DEFAULT)
-    audio_duration_ms = len(audio_data) / (sample_rate * SAMPLE_WIDTH) * 1000
-    logger.info(f"Processing speech segment for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms duration")
+    # Check processing lock to prevent multiple simultaneous processing
+    vad_state = vad_states.get(call_sid, {})
+    if vad_state.get('processing_lock', False):
+        logger.info(f"🚫 Skipping speech processing for {call_sid} - already processing")
+        return
+    
+    # Set processing lock
+    vad_state['processing_lock'] = True
+    
+    try:
+        sample_rate = audio_config_store.get(call_sid, {}).get('sample_rate', SAMPLE_RATE_DEFAULT)
+        audio_duration_ms = len(audio_data) / (sample_rate * SAMPLE_WIDTH) * 1000
+        logger.info(f"Processing speech segment for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms duration")
+    except Exception as e:
+        logger.error(f"Error in speech segment processing for {call_sid}: {e}")
+        vad_state['processing_lock'] = False
+        return
     
     # Quality-focused processing - require longer segments for better accuracy
     min_duration_ms = 400  # Increased from 200/300 - require longer segments for better quality
@@ -1768,7 +1778,7 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
         # Try local Whisper first if enabled
         if USE_LOCAL_WHISPER:
             try:
-                from .local_whisper import transcribe_with_local_whisper
+                from ..services.local_whisper import transcribe_with_local_whisper
                 
                 # Convert WAV to PCM16 bytes for local Whisper
                 wav_io = io.BytesIO(wav_for_whisper)
@@ -1933,8 +1943,8 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             prev_text = info.get('asr_last_text')
             prev_ts = info.get('asr_last_ts', 0)
             now_ts = time.time()
-            if prev_text == normalized_text and (now_ts - prev_ts) < 10:
-                logger.info(f"Suppressing duplicate transcript for {call_sid}: '{text}'")
+            if prev_text == normalized_text and (now_ts - prev_ts) < 15:  # Increased from 10 to 15 seconds
+                logger.info(f"Suppressing duplicate transcript for {call_sid}: '{text}' (time since last: {now_ts - prev_ts:.1f}s)")
                 return
             info['asr_last_text'] = normalized_text
             info['asr_last_ts'] = now_ts
@@ -1954,6 +1964,11 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
     except Exception as e:
         logger.error(f"Speech processing error for {call_sid}: {e}")
         logger.debug(f"Failed audio details for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms")
+    finally:
+        # Always release the processing lock with a small delay to prevent rapid re-processing
+        vad_state['processing_lock'] = False
+        # Add a small delay to prevent immediate re-processing of the same audio
+        await asyncio.sleep(0.1)
 
 async def response_to_user_speech(call_sid: str, text: str) -> None:
     """Handle user speech response after transcription is complete"""
@@ -3206,7 +3221,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             
             # Try to extract intent from the clarified response
             try:
-                from ops_integrations.flows.intents import extract_plumbing_intent
+                from ..flows.intents import extract_plumbing_intent
                 new_intent = await extract_plumbing_intent(followup_text)
                 
                 # Check if we now have a clearer intent
@@ -3794,7 +3809,7 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
 
     # 2) Try to extract intent again.
     try:
-        from ops_integrations.flows.intents import extract_plumbing_intent  # type: ignore
+        from ..flows.intents import extract_plumbing_intent  # type: ignore
         new_intent = await extract_plumbing_intent(followup_text)
     except Exception as e:
         logger.error(f"Re-extract intent failed for {call_sid}: {e}")

@@ -69,11 +69,11 @@ free_port 3000
 
 # Start services
 log "Starting Magiclink API on :8000"
-uvicorn Magiclink.magic:app --host 0.0.0.0 --port 8000 --reload &
+(cd Magiclink && uvicorn magic:app --host 0.0.0.0 --port 8000 --reload) &
 PID_MAGIC=$!
 
 log "Starting Phone API on :5001"
-python3 -m uvicorn ops_integrations.adapters.phone:app --host 0.0.0.0 --port 5001 --reload &
+uvicorn ops_integrations.adapters.phone:app --host 0.0.0.0 --port 5001 --reload &
 PID_PHONE=$!
 
 log "Starting Next.js dev on :3000"

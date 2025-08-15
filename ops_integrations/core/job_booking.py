@@ -14,19 +14,19 @@ load_dotenv()
 
 # Prefer package-relative imports; on failure, fall back to script-friendly absolute imports
 try:
-    from .adapters.crm import CRMAdapter, InteractionType
-    from .adapters.google_calendar import CalendarAdapter
-    from .adapters.sms import SMSAdapter
+    from ops_integrations.adapters.integrations.crm import CRMAdapter, InteractionType
+    from ops_integrations.adapters.external_services.google_calendar import CalendarAdapter
+    from ops_integrations.adapters.external_services.sms import SMSAdapter
 except Exception:
     import sys as _sys
     import os as _os
     _CURRENT_DIR = _os.path.dirname(__file__)
-    # Ensure ops_integrations (this file's directory) is on sys.path so 'adapters' can be imported as top-level
-    if _CURRENT_DIR not in _sys.path:
-        _sys.path.insert(0, _CURRENT_DIR)
-    from adapters.crm import CRMAdapter, InteractionType
-    from adapters.google_calendar import CalendarAdapter
-    from adapters.sms import SMSAdapter
+    _OPS_ROOT = _os.path.abspath(_os.path.join(_CURRENT_DIR, '..'))
+    if _OPS_ROOT not in _sys.path:
+        _sys.path.insert(0, _OPS_ROOT)
+    from ops_integrations.adapters.integrations.crm import CRMAdapter, InteractionType
+    from ops_integrations.adapters.external_services.google_calendar import CalendarAdapter
+    from ops_integrations.adapters.external_services.sms import SMSAdapter
 
 logging.basicConfig(level=logging.INFO)
 
@@ -261,7 +261,7 @@ class JobBookingSystem:
 # Quick functions for easy job booking
 def book_emergency_job(phone: str, name: str, service: str, address: str = "", notes: str = "") -> Dict[str, Any]:
     """Quick function to book emergency job respecting scheduling rules."""
-    from .adapters.phone import find_next_compliant_slot  # lazy import to avoid cycles in adapters
+    from adapters.phone import find_next_compliant_slot  # lazy import to avoid cycles in adapters
     booking_system = JobBookingSystem()
     earliest = datetime.now() + timedelta(minutes=30)
     appointment_time = find_next_compliant_slot(earliest, emergency=True)

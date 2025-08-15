@@ -1,5 +1,5 @@
 from typing import List
-from ops_integrations.models import Job
+from ops_integrations.core.models import Job
 
 class CalendarAdapter:
     def __init__(self, provider: str = "google"):

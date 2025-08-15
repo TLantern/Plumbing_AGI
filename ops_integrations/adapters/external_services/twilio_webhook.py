@@ -17,11 +17,8 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Add the parent directory to the path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
 # Import the plumbing services intent recognition
-from adapters.plumbing_services import infer_multiple_job_types_from_text
+from ops_integrations.services.plumbing_services import infer_multiple_job_types_from_text
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
