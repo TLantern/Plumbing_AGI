@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/button';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useIsMounted } from '@/hooks/useIsMounted';
 import { cn } from '@/lib/utils';
+import FullCalendar from '@fullcalendar/react';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import interactionPlugin from '@fullcalendar/interaction';
 
 interface SlaPoint { date: string; value: number; }
 interface CsatPoint { name: string; value: number; }
@@ -81,58 +84,67 @@ function useSlaClock(activeCalls: number) {
   return { running: Boolean(startedAt), elapsedSec: elapsed };
 }
 
-function MiniCalendar({ date = new Date(), onSelect }: { date?: Date; onSelect?: (d: Date) => void }) {
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const firstDay = new Date(year, month, 1);
-  const startDay = firstDay.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const days: Array<Date | null> = [];
-  for (let i = 0; i < startDay; i++) days.push(null);
-  for (let d = 1; d <= daysInMonth; d++) days.push(new Date(year, month, d));
-  while (days.length % 7 !== 0) days.push(null);
+function FullCalendarComponent({ 
+  date = new Date(), 
+  onSelect 
+}: { 
+  date?: Date; 
+  onSelect?: (d: Date) => void 
+}) {
+  const calendarRef = useRef<any>(null);
+  
+  const handleDateClick = (arg: any) => {
+    onSelect?.(arg.date);
+  };
 
-  const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const goToDate = (newDate: Date) => {
+    const calendarApi = calendarRef.current?.getApi();
+    if (calendarApi) {
+      calendarApi.gotoDate(newDate);
+    }
+  };
+
+  // Update calendar when date prop changes
+  useEffect(() => {
+    if (date) {
+      goToDate(date);
+    }
+  }, [date]);
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-white/80">
-          {date.toLocaleString(undefined, { month: 'long' })} {year}
-        </div>
-      </div>
-      <div className="grid grid-cols-7 text-center text-xs text-white/50">
-        {weekdays.map((w) => (
-          <div key={w} className="py-1">{w}</div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {days.map((d, idx) => (
-          <button
-            key={idx}
-            className={`h-8 rounded text-xs ${d ? 'hover:bg-white/10 text-white/90' : 'opacity-30 cursor-default'}`}
-            onClick={() => d && onSelect?.(d)}
-            disabled={!d}
-          >
-            {d ? d.getDate() : ''}
-          </button>
-        ))}
+      <div className="fullcalendar-container bg-white rounded-lg p-4">
+        <FullCalendar
+          ref={calendarRef}
+          plugins={[dayGridPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          initialDate={date}
+          dateClick={handleDateClick}
+          height="auto"
+          headerToolbar={{
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth'
+          }}
+          dayMaxEvents={true}
+          moreLinkClick="popover"
+          fixedWeekCount={false}
+          showNonCurrentDates={true}
+          aspectRatio={1.35}
+          selectable={true}
+          selectMirror={true}
+          dayHeaders={true}
+          weekends={true}
+          navLinks={true}
+          editable={false}
+          eventDisplay="block"
+        />
       </div>
     </div>
   );
 }
 
-function generateTimeSlots(from: Date, count: number): Date[] {
-  const slots: Date[] = [];
-  const start = new Date(from);
-  start.setSeconds(0, 0);
-  const minute = start.getMinutes();
-  start.setMinutes(minute + (minute % 30 === 0 ? 0 : 30 - (minute % 30)));
-  for (let i = 0; i < count; i++) {
-    slots.push(new Date(start.getTime() + i * 30 * 60 * 1000));
-  }
-  return slots;
-}
+
 
 export default function LiveOpsDashboard() {
   const mounted = useIsMounted();
@@ -143,7 +155,6 @@ export default function LiveOpsDashboard() {
   const [rightTab, setRightTab] = useState<'details' | 'notes'>('details');
   const [selectedCall, setSelectedCall] = useState<RecentCall | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
-  const [selectedSlot, setSelectedSlot] = useState<Date | null>(null);
 
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const [transcripts, setTranscripts] = useState<Array<{ callSid: string; text: string; intent?: string; ts: string }>>([]);
@@ -172,7 +183,6 @@ export default function LiveOpsDashboard() {
   const [highlightActions, setHighlightActions] = useState(false);
   const [overrideMode, setOverrideMode] = useState(false);
   const [overrideDate, setOverrideDate] = useState<Date | null>(null);
-  const [overrideSlot, setOverrideSlot] = useState<Date | null>(null);
 
   // Action Audit State
   interface SystemAction {
@@ -283,7 +293,6 @@ export default function LiveOpsDashboard() {
         // Reset override mode when new job comes in
         setOverrideMode(false);
         setOverrideDate(null);
-        setOverrideSlot(null);
         
         addSystemAction('Job Created', `Generated job ticket for ${jd.service_type || 'service request'} - ready for your review`, 'pending');
       }
@@ -329,7 +338,7 @@ export default function LiveOpsDashboard() {
     );
   }
 
-  const slotOptions = generateTimeSlots(selectedDate ?? new Date(), 8);
+
   const latestSlaPct = metrics.sla && metrics.sla.length ? metrics.sla[metrics.sla.length - 1].value : null;
 
   const backendBase = process.env.NEXT_PUBLIC_BACKEND_HTTP || 'http://localhost:5001';
@@ -356,15 +365,15 @@ export default function LiveOpsDashboard() {
     // Use job description time by default, or scheduler selection if in override mode
     let appointment_iso: string | undefined;
     
-    if (overrideMode && overrideDate && overrideSlot) {
-      // Override mode: use operator-selected time
+    if (overrideMode && overrideDate) {
+      // Override mode: use operator-selected date (default to 9 AM)
       appointment_iso = new Date(
         Date.UTC(
           overrideDate.getFullYear(),
           overrideDate.getMonth(),
           overrideDate.getDate(),
-          overrideSlot.getHours(),
-          overrideSlot.getMinutes(),
+          9, // Default to 9 AM
+          0,
           0,
           0
         )
@@ -372,15 +381,15 @@ export default function LiveOpsDashboard() {
     } else if (jobDesc?.appointment_time) {
       // Default: use the time from the job description
       appointment_iso = jobDesc.appointment_time;
-    } else if (selectedDate && selectedSlot) {
-      // Fallback: use scheduler selection
+    } else if (selectedDate) {
+      // Fallback: use scheduler selection (default to 9 AM)
       appointment_iso = new Date(
         Date.UTC(
           selectedDate.getFullYear(),
           selectedDate.getMonth(),
           selectedDate.getDate(),
-          selectedSlot.getHours(),
-          selectedSlot.getMinutes(),
+          9, // Default to 9 AM
+          0,
           0,
           0
         )
@@ -416,10 +425,9 @@ export default function LiveOpsDashboard() {
       reason: 'operator override',
     });
     
-    // Enable override mode to show date/time picker
+    // Enable override mode to show date picker
     setOverrideMode(true);
     setOverrideDate(new Date()); // Default to today
-    setOverrideSlot(null);
     setHighlightActions(true);
   }
 
@@ -440,7 +448,6 @@ export default function LiveOpsDashboard() {
     setHighlightActions(false);
     setOverrideMode(false);
     setOverrideDate(null);
-    setOverrideSlot(null);
   }
 
   const liveTranscripts = transcripts.filter(t => !selectedCall || t.callSid === selectedCall.call_sid);
@@ -553,31 +560,8 @@ export default function LiveOpsDashboard() {
             <CardHeader>
               <CardTitle>Scheduler</CardTitle>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <MiniCalendar date={selectedDate ?? undefined} onSelect={(d) => { setSelectedDate(d); setSelectedSlot(null); }} />
-              </div>
-              <div className="space-y-3">
-                <div className="text-sm text-white/70">Suggested Time Slots</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {slotOptions.map((d) => {
-                    const label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    const selected = selectedSlot && d.getTime() === selectedSlot.getTime();
-                    return (
-                      <button
-                        key={d.getTime()}
-                        onClick={() => setSelectedSlot(d)}
-                        className={`px-3 py-2 rounded border text-sm ${selected ? 'border-accent bg-accent/20 text-white' : 'border-white/10 hover:bg-white/5 text-white/90'}`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                {selectedDate && selectedSlot && (
-                  <div className="text-xs text-white/70">Selected: {selectedDate.toDateString()} @ {selectedSlot.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                )}
-              </div>
+            <CardContent>
+              <FullCalendarComponent date={selectedDate ?? undefined} onSelect={(d) => { setSelectedDate(d); }} />
             </CardContent>
           </Card>
         </div>
@@ -613,8 +597,8 @@ export default function LiveOpsDashboard() {
                       <div className="flex items-center justify-between"><div className="text-white/70">Start</div><div className="text-white/90">{new Date(selectedCall.start_ts * 1000).toLocaleString()}</div></div>
                       <div className="flex items-center justify-between"><div className="text-white/70">End</div><div className="text-white/90">{new Date(selectedCall.end_ts * 1000).toLocaleString()}</div></div>
                       <div className="flex items-center justify-between"><div className="text-white/70">Duration</div><div className="text-white/90">{formatTime(selectedCall.duration_sec)}</div></div>
-                      {selectedSlot && selectedDate && (
-                        <div className="flex items-center justify-between"><div className="text-white/70">Scheduled</div><div className="text-white/90">{selectedDate.toDateString()} @ {selectedSlot.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div></div>
+                      {selectedDate && (
+                        <div className="flex items-center justify-between"><div className="text-white/70">Scheduled</div><div className="text-white/90">{selectedDate.toDateString()} @ 9:00 AM</div></div>
                       )}
                     </>
                   ) : (
@@ -730,34 +714,13 @@ export default function LiveOpsDashboard() {
           )}
           {overrideMode && (
             <div className="mt-4 space-y-4">
-              <div className="text-sm text-white/70 text-center">Select New Appointment Time</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <MiniCalendar 
+              <div className="text-sm text-white/70 text-center">Select New Appointment Date</div>
+              <div className="flex justify-center">
+                <div className="w-full max-w-md">
+                  <FullCalendarComponent 
                     date={overrideDate ?? new Date()} 
-                    onSelect={(d) => { setOverrideDate(d); setOverrideSlot(null); }} 
+                    onSelect={(d) => { setOverrideDate(d); }} 
                   />
-                </div>
-                <div className="space-y-3">
-                  <div className="text-sm text-white/70">Available Time Slots</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {generateTimeSlots(overrideDate ?? new Date(), 8).map((d) => {
-                      const label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                      const selected = overrideSlot && d.getTime() === overrideSlot.getTime();
-                      return (
-                        <button
-                          key={d.getTime()}
-                          onClick={() => setOverrideSlot(d)}
-                          className={`px-3 py-2 rounded border text-sm ${selected ? 'border-accent bg-accent/20 text-white' : 'border-white/10 hover:bg-white/5 text-white/90'}`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {overrideDate && overrideSlot && (
-                    <div className="text-xs text-white/70">Selected: {overrideDate.toDateString()} @ {overrideSlot.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                  )}
                 </div>
               </div>
             </div>
@@ -766,7 +729,7 @@ export default function LiveOpsDashboard() {
             <Button onClick={onDismiss} className="bg-white/10 text-white hover:opacity-90">Dismiss</Button>
             <Button 
               onClick={onApprove}
-              disabled={overrideMode && (!overrideDate || !overrideSlot)}
+              disabled={overrideMode && !overrideDate}
               className={highlightActions ? 'ring-2 ring-green-300 shadow-[0_0_20px_rgba(74,222,128,0.4)]' : ''}
             >
               {overrideMode ? 'Approve Override' : 'Approve'}
@@ -784,4 +747,4 @@ export default function LiveOpsDashboard() {
       </div>
     </div>
   );
-} 
+}

@@ -2130,41 +2130,40 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
         explicit_time = parse_human_datetime(text) or gpt_infer_datetime_phrase(text)
         explicit_emergency = contains_emergency_keywords(text)
     
-    # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
-    # But skip deferring if we've already collected their name and this is their first plumbing issue description
+    # Check if we've collected name and this is their first plumbing issue description
     info = call_info_store.get(call_sid, {})
     segments_count = int(info.get('segments_count', 0)) + 1
     info['segments_count'] = segments_count
     call_info_store[call_sid] = info
     
-    # Check if we've collected name - if so, proceed directly with intent handling
     dialog = call_dialog_state.get(call_sid, {})
     name_collected = dialog.get('step') == 'name_collected' or dialog.get('customer_name')
     
+    # If we've collected their name and this is their first plumbing issue description, ask for more details
+    if name_collected and not explicit_time and not explicit_emergency and not is_affirmative_response(text):
+        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_problem_details'}
+        logger.info(f"🔍 ASKING FOR PROBLEM DETAILS: First plumbing issue from {call_sid} - asking specifically how and when it started")
+        twiml = VoiceResponse()
+        job_type = intent.get('job', {}).get('type', 'plumbing issue')
+        await add_tts_or_say_to_twiml(
+            twiml,
+            call_sid,
+            f"Tell me more about your {_speakable(job_type)}, specifically how and when it started."
+        )
+        start = Start()
+        wss_url = _build_wss_url_for_resume(call_sid)
+        start.stream(url=wss_url, track="inbound_track")
+        twiml.append(start)
+        twiml.pause(length=3600)
+        await push_twiml_to_call(call_sid, twiml)
+        return
+    
+    # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
     if (segments_count < 2 and not explicit_time and not explicit_emergency and 
         not is_affirmative_response(text) and not name_collected):
-        # For the first plumbing issue description, ask for more details instead of deferring
-        if name_collected:
-            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_problem_details'}
-            logger.info(f"🔍 ASKING FOR PROBLEM DETAILS: First plumbing issue from {call_sid} - asking specifically how and when it started")
-            twiml = VoiceResponse()
-            job_type = intent.get('job', {}).get('type', 'plumbing issue')
-            await add_tts_or_say_to_twiml(
-                twiml,
-                call_sid,
-                f"Tell me more about your {_speakable(job_type)}, specifically how and when it started."
-            )
-            start = Start()
-            wss_url = _build_wss_url_for_resume(call_sid)
-            start.stream(url=wss_url, track="inbound_track")
-            twiml.append(start)
-            twiml.pause(length=3600)
-            await push_twiml_to_call(call_sid, twiml)
-            return
-        else:
-            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
-            logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
-            return
+        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+        logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
+        return
     twiml = await handle_intent(call_sid, intent)
     await push_twiml_to_call(call_sid, twiml)
 
@@ -3356,17 +3355,26 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         if state.get('step') == 'awaiting_problem_details':
             # Save the detailed response as notes with specific how/when information
             detailed_notes = f"Customer details - How and when it started: {followup_text}"
+            
+            # Ensure job section exists and update description
+            if 'job' not in intent:
+                intent['job'] = {}
             intent['job']['description'] = detailed_notes
             
-            # Log the detailed information
+            # Update the dialog state to preserve the enhanced intent
+            state['intent'] = intent
+            call_dialog_state[call_sid] = state
+            
+            # Log the detailed information prominently
             logger.info(f"💬 RECEIVED DETAILED PROBLEM DESCRIPTION for {call_sid}:")
-            logger.info(f"   🔧 Service: {intent.get('job', {}).get('type', 'plumbing issue')}")
-            logger.info(f"   📝 How and when it started: {followup_text}")
-            logger.info(f"   💾 Saved as notes: {detailed_notes}")
+            logger.info(f"   🔧 Service Type: {intent.get('job', {}).get('type', 'plumbing issue')}")
+            logger.info(f"   📝 Customer's description of how and when it started: {followup_text}")
+            logger.info(f"   💾 Saved as job notes: {detailed_notes}")
+            logger.info(f"   ✅ Problem details collected successfully for {call_sid}")
             
             # Get job type for the response
             job_type = intent.get('job', {}).get('type', 'plumbing issue')
-            urgency = state.get('urgency', 'flex')
+            urgency = intent.get('job', {}).get('urgency', 'flex')
             
             # Thank them for providing more details
             await add_tts_or_say_to_twiml(
