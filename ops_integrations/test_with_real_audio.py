@@ -11,7 +11,7 @@ import wave
 import numpy as np
 
 # Configuration
-REMOTE_WHISPER_URL = "https://de9b49ba94c2.ngrok-free.app"
+REMOTE_WHISPER_URL = "https://ee7689bd1c73.ngrok-free.app"
 
 def create_test_audio_with_speech():
     """Create a test audio file with some speech-like content"""

@@ -8,6 +8,7 @@ pytest-cov>=4.0.0
 openai>=1.0.0
 httpx>=0.24.0
 webrtcvad>=2.0.10
+elevenlabs>=2.9.0
 
 # Optional: for better test output
 pytest-html>=3.1.0

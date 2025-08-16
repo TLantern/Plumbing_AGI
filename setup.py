@@ -19,6 +19,7 @@ setup(
         "twilio==8.10.0",
         "clicksend-client>=5.0.0",
         "openai>=1.0",
+        "elevenlabs>=2.9.0",
         "Flask==2.3.3",
         "fastapi>=0.100",
         "uvicorn>=0.20",

@@ -11,6 +11,14 @@ EXTERNAL_WEBHOOK_URL=https://your-ngrok-url.ngrok.io
 # OpenAI Configuration (for speech-to-text)
 OPENAI_API_KEY=your_openai_api_key_here
 
+# ElevenLabs Configuration (for text-to-speech)
+# Get your API key from: https://elevenlabs.io/app/api-key
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+# Voice ID from ElevenLabs voice library (e.g., kdmDKE6EkgrWrrykO9Qt)
+ELEVENLABS_VOICE_ID=kdmDKE6EkgrWrrykO9Qt
+# Model ID (optional, defaults to "eleven_multilingual_v2")
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+
 # Google Calendar Configuration
 GOOGLE_CALENDAR_ID=primary
 GOOGLE_CREDENTIALS_PATH=credentials.json

@@ -44,7 +44,7 @@ class TestAudioProcessor:
         # Transcription configuration (same as phone_service.py)
         self.use_local_whisper = False
         self.use_remote_whisper = True
-        self.remote_whisper_url = whisper_url or "https://de9b49ba94c2.ngrok-free.app"
+        self.remote_whisper_url = whisper_url or "https://ee7689bd1c73.ngrok-free.app/"
         self.transcription_model = "whisper-1"
         self.fast_transcription_prompt = "Caller describing plumbing issue. Focus on clear human speech. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Maintain natural speech patterns and context."
         

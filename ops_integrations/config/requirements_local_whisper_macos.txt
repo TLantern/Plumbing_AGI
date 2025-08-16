@@ -1,0 +1,22 @@
+# Local Whisper v3 Dependencies for macOS
+# CPU-only installation (no CUDA required)
+
+# PyTorch CPU-only (compatible with macOS)
+torch>=2.0.0
+torchvision>=0.14.0
+torchaudio>=2.0.0
+
+# OpenAI Whisper (latest from GitHub for v3 support)
+git+https://github.com/openai/whisper.git
+
+# Audio processing dependencies
+numpy>=1.21.0
+scipy>=1.7.0
+
+# Additional dependencies for better performance
+transformers>=4.20.0
+accelerate>=0.20.0
+
+# Optional: For audio file handling
+librosa>=0.9.0
+soundfile>=0.10.0 

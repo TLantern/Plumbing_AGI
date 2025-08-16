@@ -27,7 +27,7 @@ class ConversationManager:
         
         # Configuration
         self.duplicate_window_seconds = 30
-        self.max_clarification_attempts = 3
+        self.max_clarification_attempts = 2
         self.max_repeated_utterances = 3
     
     def get_dialog_state(self, call_sid: str) -> Dict[str, Any]:

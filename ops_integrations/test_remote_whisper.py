@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 # Configuration
-REMOTE_WHISPER_URL = "https://de9b49ba94c2.ngrok-free.app"
+REMOTE_WHISPER_URL = "https://ee7689bd1c73.ngrok-free.app/"
 
 async def test_remote_whisper():
     """Test remote Whisper transcription with a simple audio file"""

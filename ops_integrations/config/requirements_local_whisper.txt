@@ -3,10 +3,10 @@
 
 # PyTorch with CUDA support (adjust CUDA version as needed)
 # For CUDA 12.1:
-torch>=2.0.0
-torchvision>=0.15.0
-torchaudio>=2.0.0
---index-url https://download.pytorch.org/whl/cu121
+# torch>=2.0.0
+# torchvision>=0.15.0
+# torchaudio>=2.0.0
+# --index-url https://download.pytorch.org/whl/cu121
 
 # For CUDA 11.8 (alternative):
 # torch>=2.0.0
@@ -14,10 +14,10 @@ torchaudio>=2.0.0
 # torchaudio>=2.0.0
 # --index-url https://download.pytorch.org/whl/cu118
 
-# For CPU only:
-# torch>=2.0.0
-# torchvision>=0.15.0
-# torchaudio>=2.0.0
+# For CPU only (recommended for macOS):
+torch>=2.0.0
+torchvision>=0.14.0
+torchaudio>=2.0.0
 
 # OpenAI Whisper (latest from GitHub for v3 support)
 git+https://github.com/openai/whisper.git

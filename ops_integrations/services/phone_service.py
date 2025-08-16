@@ -27,6 +27,7 @@ try:
     )
     from core.job_booking import book_emergency_job, book_scheduled_job
     from adapters.external_services.google_calendar import CalendarAdapter
+    from adapters.conversation_manager import ConversationManager
 except Exception:
     import sys as _sys
     import os as _os
@@ -41,6 +42,7 @@ except Exception:
     )
     from core.job_booking import book_emergency_job, book_scheduled_job
     from adapters.external_services.google_calendar import CalendarAdapter
+    from adapters.conversation_manager import ConversationManager
 from datetime import datetime, timedelta, timezone
 try:
     import webrtcvad  # type: ignore
@@ -117,7 +119,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://de9b49ba94c2.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = "https://ee7689bd1c73.ngrok-free.app"  # Replace with your ngrok URL
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
@@ -225,6 +227,9 @@ try:
 except Exception as e:
     logger.error(f"Twilio client init failed: {e}")
     twilio_client = None
+
+# Initialize conversation manager for tracking clarification attempts
+conversation_manager = ConversationManager()
 
 logger.info(
     "env_loaded",
@@ -2431,8 +2436,41 @@ def infer_urgency_from_text(text: str) -> str:
     
     return 'flex'  # Default to flexible
 
-# TTS: synthesize with OpenAI 4o TTS
+# TTS: synthesize with ElevenLabs or OpenAI 4o TTS
 async def synthesize_tts(text: str) -> Optional[bytes]:
+    # Try ElevenLabs first if configured
+    if settings.ELEVENLABS_API_KEY and settings.ELEVENLABS_VOICE_ID:
+        try:
+            from elevenlabs import ElevenLabs
+            
+            # Create ElevenLabs client with API key
+            client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
+            
+            # Use configured voice ID or default to the specified one
+            voice_id = settings.ELEVENLABS_VOICE_ID
+            model_id = settings.ELEVENLABS_MODEL_ID or "eleven_multilingual_v2"
+            
+            # Generate audio using ElevenLabs
+            audio_stream = client.text_to_speech.convert(
+                voice_id=voice_id,
+                text=text,
+                model_id=model_id
+            )
+            
+            # Convert iterator to bytes
+            audio = b"".join(audio_stream)
+            
+            if audio:
+                logger.debug(f"ElevenLabs TTS generated {len(audio)} bytes for text: {text[:50]}...")
+                return audio
+            else:
+                logger.error("ElevenLabs TTS returned empty response")
+                
+        except Exception as e:
+            logger.error(f"ElevenLabs TTS failed: {e}")
+            logger.info("Falling back to OpenAI TTS...")
+    
+    # Fallback to OpenAI TTS
     try:
         voice = getattr(settings, 'OPENAI_TTS_VOICE', 'alloy')  # Default to 'alloy' voice
         model = getattr(settings, 'OPENAI_TTS_MODEL', 'tts-1')  # Default to 'tts-1' model
@@ -3030,52 +3068,55 @@ STRICT_NO_PATTERNS = {
 }
 
 def is_strict_affirmative_response(text: str) -> bool:
-    """Strict yes detection for appointment confirmation - only accepts clear affirmatives"""
+    """Flexible yes detection for appointment confirmation - accepts any response with affirmative intent"""
     norm = " ".join((text or "").lower().strip().strip(".,!?").split())
-    # Must be exact match or start with yes/yeah/yep
-    if norm in STRICT_YES_PATTERNS:
+    
+    # Check for any form of "yes" anywhere in the text
+    if any(word in norm for word in ["yes", "yeah", "yep", "yup"]):
         return True
-    # Check if "yes" appears anywhere in the text (for phrases like "I said yes")
-    if "yes" in norm:
+    
+    # Check for positive confirmation words
+    positive_words = ["sure", "okay", "ok", "correct", "right", "absolutely", "definitely", "perfect", "great", "good", "sounds good", "works", "fine"]
+    if any(word in norm for word in positive_words):
         return True
-    words = norm.split()
-    if len(words) <= 2 and words[0] in {"yes", "yeah", "yep", "yup", "correct", "affirmative", "sure", "okay", "ok", "right", "exactly", "absolutely", "definitely"}:
+    
+    # Check for positive phrases
+    positive_phrases = ["let's do it", "that works", "that sounds good", "i'll take it", "book it", "schedule it", "go ahead", "do it", "sounds great", "looks good", "works for me", "i'm good", "that's good"]
+    if any(phrase in norm for phrase in positive_phrases):
         return True
-    # Accept repeated affirmative tokens only (e.g., "yes yes yes", "yeah yep")
-    allowed_yes_tokens = {"yes", "yeah", "yep", "yup", "ok", "okay", "correct", "affirmative", "sure", "right", "exactly", "absolutely", "definitely"}
-    if words and all(w in allowed_yes_tokens for w in words):
-        return True
+    
     # Vocal confirmations
-    vocal_confirms = ["uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet"]
-    if norm in vocal_confirms:
+    if any(vocal in norm for vocal in ["uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet"]):
         return True
+    
     return False
 
 def is_strict_negative_response(text: str) -> bool:
-    """Strict no detection for appointment confirmation - only accepts clear negatives"""
+    """Flexible no detection for appointment confirmation - accepts any response with negative intent"""
     norm = " ".join((text or "").lower().strip().strip(".,!?").split())
-    if norm in STRICT_NO_PATTERNS:
+    
+    # Check for any form of "no" anywhere in the text
+    if any(word in norm for word in ["no", "nope", "nah"]):
         return True
-    # Check if "no" appears anywhere in the text (for phrases like "I said no")
-    if "no" in norm:
+    
+    # Check for negative words
+    negative_words = ["not", "can't", "cannot", "won't", "will not", "don't", "do not", "doesn't", "does not", "unable", "unavailable", "busy", "conflict"]
+    if any(word in norm for word in negative_words):
         return True
-    words = norm.split()
-    if len(words) <= 2 and words[0] in {"no", "nope", "nah", "negative"}:
+    
+    # Check for negative phrases
+    negative_phrases = ["that doesn't work", "that does not work", "not that time", "not today", "can't make it", "cannot make it", "not available", "busy then", "have other plans", "doesn't work", "does not work", "not good", "not right", "wrong time", "bad time"]
+    if any(phrase in norm for phrase in negative_phrases):
         return True
-    # Accept repeated negative tokens and common polite closers (e.g., "no no nah no thanks")
-    filler_tokens = {"thanks", "thank", "you"}
-    filtered = [w for w in words if w not in filler_tokens]
-    allowed_no_tokens = {"no", "nope", "nah", "negative"}
-    if filtered and all(w in allowed_no_tokens for w in filtered):
-        return True
+    
     # Vocal negations
-    vocal_negatives = ["uh uh", "nuh uh", "mm mm", "not really", "maybe not", "probably not"]
-    if norm in vocal_negatives:
+    if any(vocal in norm for vocal in ["uh uh", "nuh uh", "mm mm", "not really", "maybe not", "probably not"]):
         return True
-    # Common negative phrases
-    negative_phrases = ["i don't think so", "i don't agree", "that's not right", "that's wrong"]
-    if norm in negative_phrases:
+    
+    # Common negative expressions
+    if any(expr in norm for expr in ["i don't think so", "i don't agree", "that's not right", "that's wrong"]):
         return True
+    
     return False
 
 def _speakable(text: Optional[str]) -> str:
@@ -3442,13 +3483,29 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 
                 # Check if we now have a clearer intent
                 if new_intent and has_no_clear_service_intent(new_intent):
-                    # Still unclear - politely end the call
-                    await add_tts_or_say_to_twiml(
-                        twiml, 
-                        call_sid, 
-                        "I'm having trouble understanding the specific plumbing issue you need help with. Please feel free to call back when you have a specific plumbing problem, or you can speak directly to one of our dispatchers. Thank you for calling!"
-                    )
-                    return twiml
+                    # Still unclear - check clarification attempts
+                    clarification_count = conversation_manager.increment_clarification_attempts(call_sid)
+                    logger.info(f"❓ STILL UNCLEAR: Intent still unclear after clarification attempt #{clarification_count} for {call_sid}")
+                    
+                    # If we've asked for clarification too many times, transfer to human dispatch
+                    if conversation_manager.should_handoff_due_to_clarification_attempts(call_sid):
+                        logger.info(f"🤝 HANDOFF: Too many clarification attempts ({clarification_count}) for unclear intent - transferring to human dispatch")
+                        await add_tts_or_say_to_twiml(
+                            twiml, 
+                            call_sid, 
+                            "I'm having trouble understanding the specific plumbing issue you need help with. Let me connect you with our dispatch team who can better assist you."
+                        )
+                        conversation_manager.reset_clarification_attempts(call_sid)
+                        return twiml
+                    else:
+                        # Ask for clarification one more time
+                        await add_tts_or_say_to_twiml(
+                            twiml, 
+                            call_sid, 
+                            "I'm still having trouble understanding your specific plumbing issue. Could you tell me in simple terms what's wrong? For example, 'my toilet is clogged' or 'my faucet is leaking'."
+                        )
+                        # Keep them in the clarification state
+                        return twiml
                 else:
                     # Now we have a clear intent - proceed with booking flow
                     logger.info(f"✅ Clarified intent for {call_sid}: {new_intent}")
@@ -3617,6 +3674,8 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         if state.get('step') == 'awaiting_time_confirm':
             if is_strict_affirmative_response(followup_text):
                 logger.info(f"✅ YES DETECTED: User confirmed appointment for {call_sid} with response: '{followup_text}'")
+                # Reset clarification attempts on successful confirmation
+                conversation_manager.reset_clarification_attempts(call_sid)
                 # User said YES - proceed to operator
                 suggested_time = state.get('suggested_time')
                 if isinstance(suggested_time, datetime):
@@ -3631,14 +3690,30 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     return twiml
             elif is_strict_negative_response(followup_text):
                 logger.info(f"❌ NO DETECTED: User declined appointment for {call_sid} with response: '{followup_text}'")
+                # Reset clarification attempts on clear negative response
+                conversation_manager.reset_clarification_attempts(call_sid)
                 # User said NO - go back to scheduling
                 await add_tts_or_say_to_twiml(twiml, call_sid, "No problem. Tell me what date and time would work better for you, or say 'earliest' for the next available slot.")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
                 append_stream_and_pause(twiml)
                 return twiml
             else:
-                # Ambiguous response - ask again with strict instructions
-                logger.info(f"❓ AMBIGUOUS RESPONSE: User response '{followup_text}' for {call_sid} was not clearly yes or no - asking for clarification")
+                # Ambiguous response - check clarification attempts before asking again
+                clarification_count = conversation_manager.increment_clarification_attempts(call_sid)
+                logger.info(f"❓ AMBIGUOUS RESPONSE: User response '{followup_text}' for {call_sid} was not clearly yes or no - clarification attempt #{clarification_count}")
+                
+                # If we've asked for clarification too many times, transfer to human dispatch
+                if conversation_manager.should_handoff_due_to_clarification_attempts(call_sid):
+                    logger.info(f"🤝 HANDOFF: Too many clarification attempts ({clarification_count}) for {call_sid} - transferring to human dispatch")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble understanding your response. Let me connect you with our dispatch team who can help you schedule your appointment.")
+                    # Reset attempts and transition to operator handoff
+                    conversation_manager.reset_clarification_attempts(call_sid)
+                    state['step'] = 'awaiting_operator_confirm'
+                    call_dialog_state[call_sid] = state
+                    append_stream_and_pause(twiml)
+                    return twiml
+                
+                # Ask for clarification with clear instructions
                 suggested_time = state.get('suggested_time')
                 if isinstance(suggested_time, datetime):
                     await add_tts_or_say_to_twiml(twiml, call_sid, f"I need a clear answer. Do you want the appointment at {_format_slot(suggested_time)}? Please say exactly YES if you want it, or NO if you don't.")

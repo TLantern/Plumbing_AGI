@@ -14,7 +14,7 @@ class TestConversationManager:
     def test_initialization(self, conversation_manager):
         """Test ConversationManager initialization"""
         assert conversation_manager.duplicate_window_seconds == 30
-        assert conversation_manager.max_clarification_attempts == 3
+        assert conversation_manager.max_clarification_attempts == 2
         assert conversation_manager.max_repeated_utterances == 3
         assert len(conversation_manager.dialog_states) == 0
         assert len(conversation_manager.call_info_store) == 0
@@ -170,7 +170,6 @@ class TestConversationManager:
         # Increment to max attempts
         conversation_manager.increment_clarification_attempts(call_sid)  # 1
         conversation_manager.increment_clarification_attempts(call_sid)  # 2
-        conversation_manager.increment_clarification_attempts(call_sid)  # 3
         
         # Should handoff now
         assert conversation_manager.should_handoff_due_to_clarification_attempts(call_sid) == True
