@@ -92,9 +92,9 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: Optional[str] = None  # Set a default in env if desired
     ELEVENLABS_MODEL_ID: Optional[str] = None  # e.g. "eleven_multilingual_v2"
     FORCE_SAY_ONLY: bool = False  # Diagnostics: avoid TTS and use <Say>
-    # OpenAI TTS Configuration
-    OPENAI_TTS_SPEED: float = 1.25  # Increased from 1.0 for faster responses (0.25 to 4.0)
-    SPEECH_GATE_BUFFER_SEC: float = 1.0  # Buffer time added to TTS duration for speech gate
+    # OpenAI TTS Configuration - OPTIMIZED FOR SPEED
+    OPENAI_TTS_SPEED: float = 1.5  # OPTIMIZED: Increased from 1.25 for faster responses (0.25 to 4.0)
+    SPEECH_GATE_BUFFER_SEC: float = 0.3  # OPTIMIZED: Reduced from 1.0s for faster gate release
     # Confidence Thresholds
     TRANSCRIPTION_CONFIDENCE_THRESHOLD: float = -0.7  # Relaxed from -0.6 - allow more transcriptions through (-1.0 = normal, -0.5 = stricter)
     INTENT_CONFIDENCE_THRESHOLD: float = 0.5  # Increased from 0.4 - higher intent confidence requirement
@@ -119,24 +119,24 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://ee7689bd1c73.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = "https://5c7f9c62c8b9.ngrok-free.app"  # Replace with your ngrok URL
 
 # Fallback to OpenAI Whisper if local not available
-TRANSCRIPTION_MODEL = "whisper-1"
+TRANSCRIPTION_MODEL = "whisper-1"  # Note: Remote service uses large-v3 (Whisper 3) for better performance
 # Enhanced prompt for better transcription quality
 FAST_TRANSCRIPTION_PROMPT = "Caller describing plumbing issue. Focus on clear human speech. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Maintain natural speech patterns and context."
 
-# VAD Configuration
+# VAD Configuration - OPTIMIZED FOR SPEED
 VAD_AGGRESSIVENESS = 1  # Reduced from 3 - less aggressive filtering for better sensitivity
 VAD_FRAME_DURATION_MS = 20  # Increased from 20ms - better accuracy for voice detection
-SILENCE_TIMEOUT_SEC = 1.8  # Increased from 1.5s - allow longer natural pauses
-PROBLEM_DETAILS_SILENCE_TIMEOUT_SEC = 3.0  # Longer timeout specifically for problem details phase
-MIN_SPEECH_DURATION_SEC = 0.5  # Increased from 0.3s - filter out brief noise
-CHUNK_DURATION_SEC = 4.0  # Regular chunk duration for normal conversations
-PROBLEM_DETAILS_CHUNK_DURATION_SEC = 15.0  # Extended chunk duration specifically for problem details phase
+SILENCE_TIMEOUT_SEC = 1.2  # OPTIMIZED: Reduced from 1.8s for faster responses
+PROBLEM_DETAILS_SILENCE_TIMEOUT_SEC = 2.0  # OPTIMIZED: Reduced from 3.0s for faster responses
+MIN_SPEECH_DURATION_SEC = 0.4  # OPTIMIZED: Reduced from 0.5s to capture shorter responses
+CHUNK_DURATION_SEC = 3.5  # OPTIMIZED: Reduced from 4.0s for faster processing
+PROBLEM_DETAILS_CHUNK_DURATION_SEC = 12.0  # OPTIMIZED: Reduced from 15.0s for faster processing
 PREROLL_IGNORE_SEC = 0.1  # Increased from 0.4s - better initial speech detection
 MIN_START_RMS = 85  # Reduced from 130 - more sensitive to quiet speech
-FAST_RESPONSE_MODE = False  # Disabled for better quality over speed
+FAST_RESPONSE_MODE = False  # Disabled - parallel processing with Whisper 1 could hurt performance
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
 SAMPLE_RATE_DEFAULT = 8000
@@ -177,7 +177,7 @@ tts_audio_store: dict[str, bytes] = {}
 last_twiml_store: dict[str, str] = {}
 # Track last TwiML push timestamp to throttle rapid updates
 last_twiml_push_ts: dict[str, float] = {}
-TWIML_PUSH_MIN_INTERVAL_SEC = 1.5
+TWIML_PUSH_MIN_INTERVAL_SEC = 0.8  # OPTIMIZED: Reduced from 1.5s for faster updates
 # Incrementing version per call to bust TwiML dedupe/caching for <Play>
 tts_version_counter: dict[str, int] = {}
 
@@ -910,6 +910,13 @@ async def ops_action_approve(request: Request):
             logger.info(f"Sheets CRM sync on approve: {sync_res}")
         except Exception as _e:
             logger.debug(f"Sheets CRM sync skipped/failed: {_e}")
+        
+        # Send appointment confirmation to frontend calendar
+        try:
+            await _send_appointment_confirmation_to_frontend(call_sid, name, service, appt, address, phone)
+        except Exception as e:
+            logger.debug(f"Failed to send appointment confirmation to frontend: {e}")
+        
         return JSONResponse(content={"ok": True, "result": result})
     except HTTPException:
         raise
@@ -964,6 +971,58 @@ async def ops_action_handoff(request: Request):
     except Exception as e:
         logger.error(f"Handoff action failed for {call_sid}: {e}")
         raise HTTPException(status_code=500, detail="handoff_failed")
+
+# Send appointment confirmation to frontend calendar
+async def _send_appointment_confirmation_to_frontend(call_sid: str, customer_name: str, service_type: str, appointment_time: datetime, address: str, phone: str) -> None:
+    """Send appointment confirmation to frontend calendar via WebSocket"""
+    try:
+        # Normalize appointment time to ISO format
+        appt_iso = appointment_time.isoformat()
+        if not appt_iso.endswith('Z') and '+' not in appt_iso:
+            appt_iso = appt_iso + 'Z'
+        
+        # Create calendar event payload
+        event_payload = {
+            "id": f"appointment_{call_sid}",
+            "title": f"{service_type} - {customer_name}",
+            "start": appt_iso,
+            "end": (appointment_time + timedelta(hours=2)).isoformat() + ("" if appointment_time.tzinfo else "Z"),
+            "customer_name": customer_name,
+            "service_type": service_type,
+            "address": address,
+            "phone": phone,
+            "call_sid": call_sid,
+            "backgroundColor": "#10b981",  # Green color for confirmed appointments
+            "borderColor": "#059669",
+            "textColor": "#ffffff"
+        }
+        
+        payload = {
+            "type": "appointment_confirmed",
+            "data": {
+                "callSid": call_sid,
+                "event": event_payload,
+                "ts": datetime.utcnow().isoformat() + "Z",
+            },
+        }
+        
+        # Broadcast to all connected ops WebSocket clients
+        if ops_ws_clients:
+            disconnected = set()
+            for ws in ops_ws_clients:
+                try:
+                    await ws.send_json(payload)
+                except Exception as e:
+                    logger.debug(f"Failed to send appointment confirmation to ops client: {e}")
+                    disconnected.add(ws)
+            # Clean up disconnected clients
+            for ws in disconnected:
+                ops_ws_clients.discard(ws)
+        
+        logger.info(f"📅 Sent appointment confirmation to frontend calendar for {call_sid}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send appointment confirmation to frontend for {call_sid}: {e}")
 
 # Send booking confirmation to operator frontend
 async def _send_booking_to_operator(call_sid: str, intent: dict, suggested_time: datetime) -> None:
@@ -1094,6 +1153,13 @@ async def _finalize_booking_if_ready(call_sid: str) -> bool:
             logger.info(f"Sheets CRM sync on finalize: {sync_res}")
         except Exception as _e:
             logger.debug(f"Sheets CRM sync skipped/failed: {_e}")
+        
+        # Send appointment confirmation to frontend calendar
+        try:
+            await _send_appointment_confirmation_to_frontend(call_sid, name, job_type, suggested_time, address or '', phone)
+        except Exception as e:
+            logger.debug(f"Failed to send appointment confirmation to frontend: {e}")
+        
         logger.info(f"Booking finalized for {call_sid}")
         return True
     except Exception as e:
@@ -2506,14 +2572,18 @@ async def _activate_speech_gate(call_sid: str, text: str):
         vad_state = vad_states[call_sid]
         current_time = time.time()
         
-        # Estimate TTS duration based on text length and speed
-        # Rough estimate: ~150 words per minute at normal speed, adjusted by TTS speed
-        word_count = len(text.split())
-        base_duration = (word_count / 150) * 60  # Base duration in seconds
-        actual_duration = base_duration / settings.OPENAI_TTS_SPEED  # Adjust for speed
+        # OPTIMIZED: Much more aggressive timing for faster responses
+        # Use character count instead of word count for better accuracy
+        char_count = len(text)
+        # Estimate ~15 chars per second at 1.5x speed (much faster calculation)
+        base_duration = char_count / (15 * settings.OPENAI_TTS_SPEED)
         
-        # Reduce buffer time for more responsive listening
-        buffer_time = min(settings.SPEECH_GATE_BUFFER_SEC, 0.5)  # Cap at 0.5s for faster response
+        # Cap maximum gate duration to prevent long blocks
+        max_gate_duration = 3.0  # Never block longer than 3 seconds
+        actual_duration = min(base_duration, max_gate_duration)
+        
+        # Minimal buffer time for speed
+        buffer_time = 0.3  # Reduced from 0.5s
         gate_duration = actual_duration + buffer_time
         
         # Activate the speech gate
@@ -3561,7 +3631,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
                 except Exception as e:
                     logger.error(f"Emergency slot suggestion failed: {e}")
-                    await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks for telling me more about your plumbing issue. I'm checking the earliest availability. One moment, please.")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks. Checking availability now.")
                     call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
             else:
                 # Ask for path: emergency vs schedule (combined with thank you message)
@@ -3643,7 +3713,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     else:
                         logger.error(f"🚨 DEBUG: suggested_time is not datetime: {suggested_time}, skipping operator confirmation")
                     # No time held; ask for date/time
-                    await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks, we received your location. Please say a date and time, like 'Friday at 3 PM'.")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Got your location. What date and time?")
                     state['step'] = 'awaiting_time'
                     call_dialog_state[call_sid] = state
                     append_stream_and_pause(twiml)
@@ -3683,17 +3753,17 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                         await _send_booking_to_operator(call_sid, intent, suggested_time)
                     except Exception as e:
                         logger.debug(f"Failed to broadcast booking to operator: {e}")
-                    await add_tts_or_say_to_twiml(twiml, call_sid, "Perfect! I've sent your appointment request to our dispatcher for confirmation. They'll be with you shortly.")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Perfect! You'll get an SMS confirmation. Thanks for choosing SafeHarbour!")
+                    twiml.hangup()
                     state['step'] = 'awaiting_operator_confirm'
                     call_dialog_state[call_sid] = state
-                    append_stream_and_pause(twiml)
                     return twiml
             elif is_strict_negative_response(followup_text):
                 logger.info(f"❌ NO DETECTED: User declined appointment for {call_sid} with response: '{followup_text}'")
                 # Reset clarification attempts on clear negative response
                 conversation_manager.reset_clarification_attempts(call_sid)
                 # User said NO - go back to scheduling
-                await add_tts_or_say_to_twiml(twiml, call_sid, "No problem. Tell me what date and time would work better for you, or say 'earliest' for the next available slot.")
+                await add_tts_or_say_to_twiml(twiml, call_sid, "No problem. What date and time works better?")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
                 append_stream_and_pause(twiml)
                 return twiml
@@ -3786,7 +3856,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 logger.info(f"Handled path choice (emergency) for CallSid={call_sid}")
                 return twiml
             elif any(k in text_norm for k in ['schedule', 'book', 'technician', 'come check', 'come out', 'appointment']):
-                await add_tts_or_say_to_twiml(twiml, call_sid, f"Great. If you have a date and time in mind, tell me now, otherwise I can suggest the earliest available.")
+                await add_tts_or_say_to_twiml(twiml, call_sid, f"Great. Tell me your preferred time, or say 'earliest'.")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
                 append_stream_and_pause(twiml)
                 logger.info(f"Handled path choice (schedule) for CallSid={call_sid}")

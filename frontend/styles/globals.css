@@ -107,4 +107,35 @@ html, body, #__next {
 
 .fullcalendar-container .fc-daygrid-day-frame {
   min-height: 3rem;
+}
+
+/* Calendar event styling */
+.fullcalendar-container .fc-event {
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 2px 4px;
+  margin: 1px 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fullcalendar-container .fc-event:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.fullcalendar-container .fc-event-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fullcalendar-container .fc-daygrid-event-dot {
+  display: none;
+}
+
+.fullcalendar-container .fc-daygrid-day-events {
+  margin-top: 2px;
 } 

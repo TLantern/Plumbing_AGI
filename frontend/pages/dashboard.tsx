@@ -22,6 +22,21 @@ interface RecentCall {
   answered: boolean;
   answer_time_sec?: number | null;
 }
+
+interface CalendarEvent {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  customer_name: string;
+  service_type: string;
+  address: string;
+  phone: string;
+  call_sid: string;
+  backgroundColor: string;
+  borderColor: string;
+  textColor: string;
+}
 interface MetricsSnapshot {
   activeCalls: number;
   totalCalls: number;
@@ -86,15 +101,28 @@ function useSlaClock(activeCalls: number) {
 
 function FullCalendarComponent({ 
   date = new Date(), 
-  onSelect 
+  onSelect,
+  events = []
 }: { 
   date?: Date; 
-  onSelect?: (d: Date) => void 
+  onSelect?: (d: Date) => void;
+  events?: CalendarEvent[];
 }) {
   const calendarRef = useRef<any>(null);
   
   const handleDateClick = (arg: any) => {
     onSelect?.(arg.date);
+  };
+
+  const handleEventClick = (arg: any) => {
+    const event = arg.event;
+    // Show event details in a simple alert for now
+    alert(`Appointment Details:
+Customer: ${event.extendedProps.customer_name}
+Service: ${event.extendedProps.service_type}
+Address: ${event.extendedProps.address}
+Phone: ${event.extendedProps.phone}
+Time: ${new Date(event.start).toLocaleString()}`);
   };
 
   const goToDate = (newDate: Date) => {
@@ -120,6 +148,7 @@ function FullCalendarComponent({
           initialView="dayGridMonth"
           initialDate={date}
           dateClick={handleDateClick}
+          eventClick={handleEventClick}
           height="auto"
           headerToolbar={{
             left: 'prev,next today',
@@ -138,6 +167,7 @@ function FullCalendarComponent({
           navLinks={true}
           editable={false}
           eventDisplay="block"
+          events={events}
         />
       </div>
     </div>
@@ -193,6 +223,7 @@ export default function LiveOpsDashboard() {
     status: 'completed' | 'in_progress' | 'pending';
   }
   const [systemActions, setSystemActions] = useState<SystemAction[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
 
   // Helper function to add system actions
   const addSystemAction = (action: string, description: string, status: 'completed' | 'in_progress' | 'pending' = 'completed') => {
@@ -295,6 +326,15 @@ export default function LiveOpsDashboard() {
         setOverrideDate(null);
         
         addSystemAction('Job Created', `Generated job ticket for ${jd.service_type || 'service request'} - ready for your review`, 'pending');
+      }
+      if (msg?.type === 'appointment_confirmed' && msg.data) {
+        const event = msg.data.event;
+        setCalendarEvents((prev) => {
+          // Remove any existing event with the same ID and add the new one
+          const filtered = prev.filter(e => e.id !== event.id);
+          return [...filtered, event];
+        });
+        addSystemAction('Appointment Confirmed', `Added ${event.customer_name}'s ${event.service_type} appointment to calendar`, 'completed');
       }
     },
     enabled: mounted,
@@ -561,7 +601,11 @@ export default function LiveOpsDashboard() {
               <CardTitle>Scheduler</CardTitle>
             </CardHeader>
             <CardContent>
-              <FullCalendarComponent date={selectedDate ?? undefined} onSelect={(d) => { setSelectedDate(d); }} />
+              <FullCalendarComponent 
+                date={selectedDate ?? undefined} 
+                onSelect={(d) => { setSelectedDate(d); }} 
+                events={calendarEvents}
+              />
             </CardContent>
           </Card>
         </div>

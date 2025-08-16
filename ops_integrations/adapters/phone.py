@@ -103,7 +103,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://ee7689bd1c73.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = "https://5c7f9c62c8b9.ngrok-free.app"  # Replace with your ngrok URL
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
@@ -890,6 +890,13 @@ async def ops_action_approve(request: Request):
             logger.info(f"Sheets CRM sync on approve: {sync_res}")
         except Exception as _e:
             logger.debug(f"Sheets CRM sync skipped/failed: {_e}")
+        
+        # Send appointment confirmation to frontend calendar
+        try:
+            await _send_appointment_confirmation_to_frontend(call_sid, name, service, appt, address, phone)
+        except Exception as e:
+            logger.debug(f"Failed to send appointment confirmation to frontend: {e}")
+        
         return JSONResponse(content={"ok": True, "result": result})
     except HTTPException:
         raise
@@ -944,6 +951,58 @@ async def ops_action_handoff(request: Request):
     except Exception as e:
         logger.error(f"Handoff action failed for {call_sid}: {e}")
         raise HTTPException(status_code=500, detail="handoff_failed")
+
+# Send appointment confirmation to frontend calendar
+async def _send_appointment_confirmation_to_frontend(call_sid: str, customer_name: str, service_type: str, appointment_time: datetime, address: str, phone: str) -> None:
+    """Send appointment confirmation to frontend calendar via WebSocket"""
+    try:
+        # Normalize appointment time to ISO format
+        appt_iso = appointment_time.isoformat()
+        if not appt_iso.endswith('Z') and '+' not in appt_iso:
+            appt_iso = appt_iso + 'Z'
+        
+        # Create calendar event payload
+        event_payload = {
+            "id": f"appointment_{call_sid}",
+            "title": f"{service_type} - {customer_name}",
+            "start": appt_iso,
+            "end": (appointment_time + timedelta(hours=2)).isoformat() + ("" if appointment_time.tzinfo else "Z"),
+            "customer_name": customer_name,
+            "service_type": service_type,
+            "address": address,
+            "phone": phone,
+            "call_sid": call_sid,
+            "backgroundColor": "#10b981",  # Green color for confirmed appointments
+            "borderColor": "#059669",
+            "textColor": "#ffffff"
+        }
+        
+        payload = {
+            "type": "appointment_confirmed",
+            "data": {
+                "callSid": call_sid,
+                "event": event_payload,
+                "ts": datetime.utcnow().isoformat() + "Z",
+            },
+        }
+        
+        # Broadcast to all connected ops WebSocket clients
+        if ops_ws_clients:
+            disconnected = set()
+            for ws in ops_ws_clients:
+                try:
+                    await ws.send_json(payload)
+                except Exception as e:
+                    logger.debug(f"Failed to send appointment confirmation to ops client: {e}")
+                    disconnected.add(ws)
+            # Clean up disconnected clients
+            for ws in disconnected:
+                ops_ws_clients.discard(ws)
+        
+        logger.info(f"📅 Sent appointment confirmation to frontend calendar for {call_sid}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send appointment confirmation to frontend for {call_sid}: {e}")
 
 # Send booking confirmation to operator frontend
 async def _send_booking_to_operator(call_sid: str, intent: dict, suggested_time: datetime) -> None:
@@ -1074,6 +1133,13 @@ async def _finalize_booking_if_ready(call_sid: str) -> bool:
             logger.info(f"Sheets CRM sync on finalize: {sync_res}")
         except Exception as _e:
             logger.debug(f"Sheets CRM sync skipped/failed: {_e}")
+        
+        # Send appointment confirmation to frontend calendar
+        try:
+            await _send_appointment_confirmation_to_frontend(call_sid, name, job_type, suggested_time, address or '', phone)
+        except Exception as e:
+            logger.debug(f"Failed to send appointment confirmation to frontend: {e}")
+        
         logger.info(f"Booking finalized for {call_sid}")
         return True
     except Exception as e:
@@ -3609,10 +3675,10 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                         await _send_booking_to_operator(call_sid, intent, suggested_time)
                     except Exception as e:
                         logger.debug(f"Failed to broadcast booking to operator: {e}")
-                    await add_tts_or_say_to_twiml(twiml, call_sid, "Perfect! I've sent your appointment request to our dispatcher for confirmation. They'll be with you shortly.")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Perfect! You'll be sent an SMS with your booking details once your appointment is confirmed. Thanks for choosing SafeHarbour, have a great rest of your day.")
+                    twiml.hangup()
                     state['step'] = 'awaiting_operator_confirm'
                     call_dialog_state[call_sid] = state
-                    append_stream_and_pause(twiml)
                     return twiml
             elif is_strict_negative_response(followup_text):
                 # Reset clarification attempts on clear negative response
