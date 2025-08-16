@@ -15,6 +15,7 @@ class TestConversationManager:
         """Test ConversationManager initialization"""
         assert conversation_manager.duplicate_window_seconds == 30
         assert conversation_manager.max_clarification_attempts == 2
+        assert conversation_manager.max_name_collection_attempts == 3
         assert conversation_manager.max_repeated_utterances == 3
         assert len(conversation_manager.dialog_states) == 0
         assert len(conversation_manager.call_info_store) == 0
@@ -174,6 +175,56 @@ class TestConversationManager:
         # Should handoff now
         assert conversation_manager.should_handoff_due_to_clarification_attempts(call_sid) == True
     
+    def test_name_collection_attempts_tracking(self, conversation_manager):
+        """Test name collection attempts tracking"""
+        call_sid = "test_call_123"
+        
+        # Initial count should be 0
+        assert conversation_manager.get_name_collection_attempts(call_sid) == 0
+        
+        # Increment attempts
+        count1 = conversation_manager.increment_name_collection_attempts(call_sid)
+        assert count1 == 1
+        assert conversation_manager.get_name_collection_attempts(call_sid) == 1
+        
+        count2 = conversation_manager.increment_name_collection_attempts(call_sid)
+        assert count2 == 2
+        assert conversation_manager.get_name_collection_attempts(call_sid) == 2
+        
+        count3 = conversation_manager.increment_name_collection_attempts(call_sid)
+        assert count3 == 3
+        assert conversation_manager.get_name_collection_attempts(call_sid) == 3
+    
+    def test_should_handoff_due_to_name_collection_attempts(self, conversation_manager):
+        """Test handoff decision based on name collection attempts"""
+        call_sid = "test_call_123"
+        
+        # Should not handoff initially
+        assert conversation_manager.should_handoff_due_to_name_collection_attempts(call_sid) == False
+        
+        # Increment to max attempts
+        conversation_manager.increment_name_collection_attempts(call_sid)  # 1
+        conversation_manager.increment_name_collection_attempts(call_sid)  # 2
+        conversation_manager.increment_name_collection_attempts(call_sid)  # 3
+        
+        # Should handoff now
+        assert conversation_manager.should_handoff_due_to_name_collection_attempts(call_sid) == True
+    
+    def test_reset_name_collection_attempts(self, conversation_manager):
+        """Test resetting name collection attempts"""
+        call_sid = "test_call_123"
+        
+        # Increment attempts
+        conversation_manager.increment_name_collection_attempts(call_sid)
+        conversation_manager.increment_name_collection_attempts(call_sid)
+        conversation_manager.increment_name_collection_attempts(call_sid)
+        
+        # Reset
+        conversation_manager.reset_name_collection_attempts(call_sid)
+        
+        # Should be back to 0
+        assert conversation_manager.get_name_collection_attempts(call_sid) == 0
+    
     def test_reset_clarification_attempts(self, conversation_manager):
         """Test resetting clarification attempts"""
         call_sid = "test_call_123"
@@ -210,6 +261,7 @@ class TestConversationManager:
         
         # Add some data
         conversation_manager.increment_clarification_attempts(call_sid)
+        conversation_manager.increment_name_collection_attempts(call_sid)
         conversation_manager.should_suppress_repeated_utterance(call_sid, text)
         conversation_manager.should_suppress_duplicate(call_sid, text)
         
@@ -218,6 +270,7 @@ class TestConversationManager:
         
         # All should be reset
         assert conversation_manager.get_clarification_attempts(call_sid) == 0
+        assert conversation_manager.get_name_collection_attempts(call_sid) == 0
         assert conversation_manager.should_suppress_repeated_utterance(call_sid, text) == False
         assert conversation_manager.should_suppress_duplicate(call_sid, text) == False
     
@@ -236,6 +289,7 @@ class TestConversationManager:
             "start_ts": time.time() - 60  # 1 minute ago
         })
         conversation_manager.increment_clarification_attempts(call_sid)
+        conversation_manager.increment_name_collection_attempts(call_sid)
         
         summary = conversation_manager.get_conversation_summary(call_sid)
         
@@ -243,6 +297,7 @@ class TestConversationManager:
         assert summary["dialog_step"] == "awaiting_name"
         assert summary["customer_name"] == "John"
         assert summary["clarification_attempts"] == 1
+        assert summary["name_collection_attempts"] == 1
         assert summary["from_number"] == "+1234567890"
         assert summary["to_number"] == "+0987654321"
         assert summary["call_duration"] > 0
@@ -255,6 +310,7 @@ class TestConversationManager:
         conversation_manager.set_dialog_state(call_sid, {"step": "test"})
         conversation_manager.set_call_info(call_sid, {"from": "+1234567890"})
         conversation_manager.increment_clarification_attempts(call_sid)
+        conversation_manager.increment_name_collection_attempts(call_sid)
         conversation_manager.should_suppress_repeated_utterance(call_sid, "test")
         conversation_manager.should_suppress_duplicate(call_sid, "test")
         
@@ -265,6 +321,7 @@ class TestConversationManager:
         assert conversation_manager.get_dialog_state(call_sid) == {}
         assert conversation_manager.get_call_info(call_sid) == {}
         assert conversation_manager.get_clarification_attempts(call_sid) == 0
+        assert conversation_manager.get_name_collection_attempts(call_sid) == 0
         assert conversation_manager.should_suppress_repeated_utterance(call_sid, "test") == False
         assert conversation_manager.should_suppress_duplicate(call_sid, "test") == False
     

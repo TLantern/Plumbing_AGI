@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: Optional[str] = None  # Set a default in env if desired
     ELEVENLABS_MODEL_ID: Optional[str] = None  # e.g. "eleven_multilingual_v2"
     FORCE_SAY_ONLY: bool = False  # Diagnostics: avoid TTS and use <Say>
+    USE_ELEVENLABS_TTS: bool = True  # Control whether to use ElevenLabs (True) or OpenAI TTS (False)
     # OpenAI TTS Configuration - OPTIMIZED FOR SPEED
     OPENAI_TTS_SPEED: float = 1.5  # OPTIMIZED: Increased from 1.25 for faster responses (0.25 to 4.0)
     SPEECH_GATE_BUFFER_SEC: float = 0.3  # OPTIMIZED: Reduced from 1.0s for faster gate release
@@ -103,6 +104,9 @@ class Settings(BaseSettings):
     # Consecutive Failure Thresholds
     CONSECUTIVE_INTENT_FAILURES_THRESHOLD: int = 2  # Number of consecutive intent confidence failures before handoff
     CONSECUTIVE_OVERALL_FAILURES_THRESHOLD: int = 2  # Number of consecutive overall confidence failures before handoff
+    # Missing fields thresholds
+    MISSING_FIELDS_PER_TURN_THRESHOLD: int = 2  # Number of critical fields missing in a single turn to count as a failure
+    CONSECUTIVE_MISSING_FIELDS_FAILURES_THRESHOLD: int = 2  # Consecutive turns with missing fields before handoff
     # Magiclink integration
     MAGICLINK_API_BASE: str = os.getenv("MAGICLINK_API_BASE", "http://localhost:8000")
     MAGICLINK_APP_URL: str = os.getenv("MAGICLINK_APP_URL", "http://localhost:3000/location")
@@ -119,7 +123,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://5c7f9c62c8b9.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = os.getenv("REMOTE_WHISPER_URL", "https://ee7689bd1c73.ngrok-free.app")  # Configurable via .env
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"  # Note: Remote service uses large-v3 (Whisper 3) for better performance
@@ -184,6 +188,21 @@ tts_version_counter: dict[str, int] = {}
 # Consecutive confidence failure tracking per call
 consecutive_intent_failures: dict[str, int] = defaultdict(int)
 consecutive_overall_failures: dict[str, int] = defaultdict(int)
+consecutive_missing_fields_failures: dict[str, int] = defaultdict(int)
+
+# NEW: Speech gate cycle tracking for comprehensive handoff detection
+speech_gate_cycle_tracking: dict[str, dict] = defaultdict(lambda: {
+    'total_cycles': 0,                    # Total speech gate cycles in this call
+    'consecutive_no_progress': 0,         # Consecutive cycles with no progress
+    'last_progress_time': 0,              # Last time we made meaningful progress
+    'last_speech_gate_time': 0,           # Last time speech gate was activated
+    'last_processed_text': '',            # Last successfully processed text
+    'last_intent_extracted': None,        # Last successfully extracted intent
+    'last_dialog_step': '',               # Last dialog step
+    'call_start_time': 0,                 # When the call started
+    'max_cycles_without_progress': 3,     # Max cycles without progress before handoff
+    'max_call_duration_without_progress': 120,  # Max seconds without progress before handoff
+})
 
 # Live Ops metrics aggregation and websocket clients
 from collections import deque
@@ -1365,6 +1384,9 @@ class ConnectionManager:
             # Clean up consecutive failure tracking
             consecutive_intent_failures.pop(call_sid, None)
             consecutive_overall_failures.pop(call_sid, None)
+            consecutive_missing_fields_failures.pop(call_sid, None)
+            # Clean up speech gate cycle tracking
+            speech_gate_cycle_tracking.pop(call_sid, None)
             # Clean up speech gate state
             if call_sid in vad_states:
                 vad_states[call_sid]['speech_gate_active'] = False
@@ -1526,6 +1548,9 @@ async def media_stream_ws(ws: WebSocket):
             # Clean up consecutive failure tracking
             consecutive_intent_failures.pop(call_sid, None)
             consecutive_overall_failures.pop(call_sid, None)
+            consecutive_missing_fields_failures.pop(call_sid, None)
+            # Clean up speech gate cycle tracking
+            speech_gate_cycle_tracking.pop(call_sid, None)
             await manager.disconnect(call_sid)
 
 #---------------MEDIA PROCESSING---------------
@@ -1933,9 +1958,11 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
                 
                 # Send to remote service with shorter timeout
                 start_time = time.time()
-                async with httpx.AsyncClient(timeout=5.0) as http_client:  # Reduced from 30s to 5s
-                    response = await http_client.post(
-                        f"{REMOTE_WHISPER_URL}/transcribe",
+                async with httpx.AsyncClient(timeout=5.0) as whisper_http_client:  # Renamed to avoid conflict
+                    # Ensure clean URL without double slashes
+                    whisper_url = REMOTE_WHISPER_URL.rstrip('/')
+                    response = await whisper_http_client.post(
+                        f"{whisper_url}/transcribe",
                         json={
                             "audio_base64": wav_base64,
                             "sample_rate": 16000,
@@ -2120,6 +2147,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             twiml.hangup()
             call_dialog_state.pop(call_sid, None)
             await push_twiml_to_call(call_sid, twiml)
+            _mark_progress(call_sid, "post_booking_qa_completed", "user ended call")
             return
         # Answer with GPT-4o and re-prompt
         answer = await answer_customer_question(call_sid, text)
@@ -2135,6 +2163,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             resp.pause(length=3600)
         append_stream_and_pause_local(twiml)
         await push_twiml_to_call(call_sid, twiml)
+        _mark_progress(call_sid, "post_booking_qa_response", f"answered question: {text[:50]}...")
         return
 
     # Name collection handling
@@ -2147,6 +2176,9 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             # Update dialog state to continue with normal flow
             dialog['step'] = 'name_collected'
             call_dialog_state[call_sid] = dialog
+            
+            # Reset name collection attempts since we succeeded
+            conversation_manager.reset_name_collection_attempts(call_sid)
             
             twiml = VoiceResponse()
             await add_tts_or_say_to_twiml(
@@ -2162,9 +2194,34 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             twiml.pause(length=3600)
             await push_twiml_to_call(call_sid, twiml)
             logger.info(f"👤 Collected name '{customer_name}' for {call_sid}")
+            _mark_progress(call_sid, "name_collected", f"extracted name: {customer_name}")
             return
         else:
-            # Couldn't extract a clear name, ask again
+            # Couldn't extract a clear name, increment attempts
+            attempts = conversation_manager.increment_name_collection_attempts(call_sid)
+            
+            # Check if we should transfer to human dispatch
+            if conversation_manager.should_handoff_due_to_name_collection_attempts(call_sid):
+                logger.info(f"🤝 HANDOFF: Too many name collection attempts ({attempts}) for {call_sid} - transferring to human dispatch")
+                twiml = VoiceResponse()
+                await add_tts_or_say_to_twiml(
+                    twiml, 
+                    call_sid, 
+                    "I'm having trouble understanding your name clearly. Let me connect you with our dispatch team who can better assist you."
+                )
+                twiml.dial(settings.DISPATCH_NUMBER)
+                # Mark state to avoid further processing
+                st = call_info_store.setdefault(call_sid, {})
+                st["handoff_requested"] = True
+                st["handoff_reason"] = "too_many_name_collection_attempts"
+                call_info_store[call_sid] = st
+                # Clear dialog state
+                call_dialog_state.pop(call_sid, None)
+                await push_twiml_to_call(call_sid, twiml)
+                _mark_progress(call_sid, "handoff_to_dispatch", f"transferred after {attempts} name collection attempts")
+                return
+            
+            # Ask again for the name
             twiml = VoiceResponse()
             await add_tts_or_say_to_twiml(
                 twiml, 
@@ -2178,6 +2235,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             twiml.append(start)
             twiml.pause(length=3600)
             await push_twiml_to_call(call_sid, twiml)
+            _mark_no_progress(call_sid, f"could not extract name from response (attempt {attempts})")
             return
 
     # Transfer confirmation handling
@@ -2196,6 +2254,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             call_dialog_state.pop(call_sid, None)
             await push_twiml_to_call(call_sid, twiml)
             logger.info(f"📞 User confirmed transfer for {call_sid} after unclear attempts")
+            _mark_progress(call_sid, "transfer_confirmed", "user confirmed transfer to dispatch")
             return
         elif is_negative_response(text):
             # User said no - continue with clarification
@@ -2216,6 +2275,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             twiml.pause(length=3600)
             await push_twiml_to_call(call_sid, twiml)
             logger.info(f"💬 User declined transfer for {call_sid}, continuing with clarification")
+            _mark_progress(call_sid, "transfer_declined", "user declined transfer, continuing clarification")
             return
         else:
             # Unclear response to transfer confirmation - ask again more directly
@@ -2228,6 +2288,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             twiml.append(start)
             twiml.pause(length=3600)
             await push_twiml_to_call(call_sid, twiml)
+            _mark_no_progress(call_sid, "unclear response to transfer confirmation")
             return
 
     # Scheduling/path and confirmation follow-up handling
@@ -2254,6 +2315,12 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
         intent = await extract_intent_from_text(call_sid, text)
         explicit_time = parse_human_datetime(text) or gpt_infer_datetime_phrase(text)
         explicit_emergency = contains_emergency_keywords(text)
+    
+    # NEW: Mark progress if we successfully extracted intent
+    if intent and intent.get('job', {}).get('type'):
+        _mark_progress(call_sid, "intent_extracted", f"extracted job type: {intent.get('job', {}).get('type')}")
+    else:
+        _mark_no_progress(call_sid, "failed to extract meaningful intent")
     
     # Check if this is a plumbing issue and we haven't asked for problem details yet
     info = call_info_store.get(call_sid, {})
@@ -2341,6 +2408,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
         twiml.append(start)
         twiml.pause(length=3600)
         await push_twiml_to_call(call_sid, twiml)
+        _mark_progress(call_sid, "problem_details_requested", f"asked for details about {job_type}")
         return
     
     # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
@@ -2348,9 +2416,11 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
         not is_affirmative_response(text)):
         # Don't set any step yet - just continue listening
         logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
+        _mark_no_progress(call_sid, f"deferring prompt - segments={segments_count}, no explicit signals")
         return
     twiml = await handle_intent(call_sid, intent)
     await push_twiml_to_call(call_sid, twiml)
+    _mark_progress(call_sid, "intent_handled", f"processed intent: {intent.get('job', {}).get('type', 'unknown')}")
 
 async def extract_intent_from_text(call_sid: str, text:str) -> dict:
    # Enhanced prompt with better context and examples
@@ -2504,20 +2574,23 @@ def infer_urgency_from_text(text: str) -> str:
 
 # TTS: synthesize with ElevenLabs or OpenAI 4o TTS
 async def synthesize_tts(text: str) -> Optional[bytes]:
-    # Try ElevenLabs first if configured
-    if settings.ELEVENLABS_API_KEY and settings.ELEVENLABS_VOICE_ID:
+    # Check if ElevenLabs TTS is enabled and configured
+    if (settings.USE_ELEVENLABS_TTS and 
+        settings.ELEVENLABS_API_KEY and 
+        settings.ELEVENLABS_VOICE_ID):
         try:
             from elevenlabs import ElevenLabs
             
             # Create ElevenLabs client with API key
-            client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
+            elevenlabs_client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
             
             # Use configured voice ID or default to the specified one
             voice_id = settings.ELEVENLABS_VOICE_ID
             model_id = settings.ELEVENLABS_MODEL_ID or "eleven_multilingual_v2"
             
             # Generate audio using ElevenLabs
-            audio_stream = client.text_to_speech.convert(
+            logger.info(f"🎤 Using ElevenLabs TTS (voice: {voice_id}, model: {model_id})")
+            audio_stream = elevenlabs_client.text_to_speech.convert(
                 voice_id=voice_id,
                 text=text,
                 model_id=model_id
@@ -2536,11 +2609,18 @@ async def synthesize_tts(text: str) -> Optional[bytes]:
             logger.error(f"ElevenLabs TTS failed: {e}")
             logger.info("Falling back to OpenAI TTS...")
     
-    # Fallback to OpenAI TTS
+    # If ElevenLabs is disabled or not configured, use OpenAI TTS
+    if not settings.USE_ELEVENLABS_TTS:
+        logger.info("🎤 ElevenLabs TTS disabled via USE_ELEVENLABS_TTS=False, using OpenAI TTS")
+    
+    # Use OpenAI TTS (either as fallback or primary choice)
     try:
+        # Use the existing global OpenAI client
         voice = getattr(settings, 'OPENAI_TTS_VOICE', 'alloy')  # Default to 'alloy' voice
         model = getattr(settings, 'OPENAI_TTS_MODEL', 'tts-1')  # Default to 'tts-1' model
         speed = settings.OPENAI_TTS_SPEED  # Use configured speed (0.25 to 4.0)
+        
+        logger.info(f"🎤 Using OpenAI TTS (voice: {voice}, model: {model}, speed: {speed})")
         
         response = client.audio.speech.create(
             model=model,
@@ -2568,7 +2648,20 @@ async def synthesize_tts(text: str) -> Optional[bytes]:
 
 async def _activate_speech_gate(call_sid: str, text: str):
     """Activate speech gate to prevent user speech processing during bot TTS output"""
+    logger.info(f"🔇 ACTIVATING SPEECH GATE for {call_sid} with text length: {len(text)}")
     try:
+        # Ensure vad_state exists
+        if call_sid not in vad_states:
+            vad_states[call_sid] = {
+                'speech_gate_active': False,
+                'bot_speaking': False,
+                'is_speaking': False,
+                'pending_audio': bytearray(),
+                'stream_start_time': time.time(),
+                'has_received_media': False,
+            }
+            logger.info(f"🔄 Initialized vad_state for {call_sid}")
+        
         vad_state = vad_states[call_sid]
         current_time = time.time()
         
@@ -2591,7 +2684,34 @@ async def _activate_speech_gate(call_sid: str, text: str):
         vad_state['bot_speaking'] = True
         vad_state['bot_speech_start_time'] = current_time
         
-        logger.info(f"🔇 Speech gate activated for {call_sid}: {gate_duration:.2f}s (text: {len(text)} chars)")
+        # NEW: Track speech gate cycle for comprehensive handoff detection
+        # Ensure tracking is properly initialized
+        if call_sid not in speech_gate_cycle_tracking:
+            speech_gate_cycle_tracking[call_sid] = {
+                'total_cycles': 0,
+                'consecutive_no_progress': 0,
+                'last_progress_time': 0,
+                'last_speech_gate_time': 0,
+                'last_processed_text': '',
+                'last_intent_extracted': None,
+                'last_dialog_step': '',
+                'call_start_time': current_time,
+                'max_cycles_without_progress': 3,
+                'max_call_duration_without_progress': 120,
+            }
+            logger.info(f"🔄 Initialized speech gate cycle tracking for {call_sid}")
+        else:
+            logger.info(f"🔄 Using existing speech gate cycle tracking for {call_sid}")
+        
+        cycle_tracking = speech_gate_cycle_tracking[call_sid]
+        cycle_tracking['total_cycles'] += 1
+        cycle_tracking['last_speech_gate_time'] = current_time
+        
+        # Initialize call start time if not set
+        if cycle_tracking['call_start_time'] == 0:
+            cycle_tracking['call_start_time'] = current_time
+        
+        logger.info(f"🔇 Speech gate activated for {call_sid}: {gate_duration:.2f}s (text: {len(text)} chars) - Cycle #{cycle_tracking['total_cycles']} (no_progress: {cycle_tracking['consecutive_no_progress']})")
         
         # Schedule gate deactivation with shorter delay for more responsive listening
         asyncio.create_task(_deactivate_speech_gate_after_delay(call_sid, gate_duration))
@@ -2615,9 +2735,128 @@ async def _deactivate_speech_gate_after_delay(call_sid: str, delay: float):
                 vad_state['is_speaking'] = False
                 vad_state['pending_audio'] = bytearray()
                 logger.debug(f"Cleared pending audio for {call_sid} after speech gate")
+            
+            # NEW: Check for handoff conditions after speech gate deactivation
+            logger.info(f"🔍 Checking handoff conditions after speech gate deactivation for {call_sid}")
+            await _check_speech_gate_handoff_conditions(call_sid)
                 
     except Exception as e:
         logger.error(f"Failed to deactivate speech gate for {call_sid}: {e}")
+
+async def _check_speech_gate_handoff_conditions(call_sid: str):
+    """Check if handoff is needed based on speech gate cycle tracking"""
+    try:
+        cycle_tracking = speech_gate_cycle_tracking.get(call_sid, {})
+        if not cycle_tracking:
+            logger.info(f"🔍 No cycle tracking found for {call_sid}")
+            return
+        
+        logger.info(f"🔍 Checking handoff conditions for {call_sid}: cycles={cycle_tracking.get('total_cycles', 0)}, no_progress={cycle_tracking.get('consecutive_no_progress', 0)}")
+        
+        current_time = time.time()
+        total_cycles = cycle_tracking.get('total_cycles', 0)
+        consecutive_no_progress = cycle_tracking.get('consecutive_no_progress', 0)
+        last_progress_time = cycle_tracking.get('last_progress_time', 0)
+        call_start_time = cycle_tracking.get('call_start_time', current_time)
+        max_cycles = cycle_tracking.get('max_cycles_without_progress', 3)
+        max_duration = cycle_tracking.get('max_call_duration_without_progress', 120)
+        
+        # Calculate time since last progress
+        time_since_progress = current_time - last_progress_time if last_progress_time > 0 else current_time - call_start_time
+        call_duration = current_time - call_start_time
+        
+        # Check handoff conditions
+        handoff_reasons = []
+        
+        # Condition 1: Too many consecutive cycles without progress
+        if consecutive_no_progress >= max_cycles:
+            handoff_reasons.append(f"{consecutive_no_progress} consecutive cycles without progress >= {max_cycles}")
+        
+        # Condition 2: Too much time without progress
+        if time_since_progress >= max_duration:
+            handoff_reasons.append(f"{time_since_progress:.1f}s without progress >= {max_duration}s")
+        
+        # Condition 3: Call has been going too long without meaningful progress
+        if call_duration >= max_duration * 2 and consecutive_no_progress >= 2:
+            handoff_reasons.append(f"call duration {call_duration:.1f}s with {consecutive_no_progress} cycles without progress")
+        
+        if handoff_reasons:
+            reasons_str = ", ".join(handoff_reasons)
+            logger.warning(f"🚨 SPEECH GATE HANDOFF TRIGGERED for {call_sid}: {reasons_str}")
+            logger.warning(f"   📊 Cycle stats: total={total_cycles}, no_progress={consecutive_no_progress}, time_since_progress={time_since_progress:.1f}s")
+            logger.error(f"🚨 AUTOMATIC HANDOFF REQUIRED: {call_sid} will be transferred to dispatch")
+            
+            # Perform automatic handoff to dispatch
+            await _perform_automatic_handoff(call_sid, f"speech_gate_cycles: {reasons_str}")
+        
+    except Exception as e:
+        logger.error(f"Error checking speech gate handoff conditions for {call_sid}: {e}")
+
+async def _perform_automatic_handoff(call_sid: str, reason: str):
+    """Perform automatic handoff to dispatch due to speech gate cycle failures"""
+    try:
+        logger.info(f"🤖 AUTOMATIC HANDOFF: Transferring {call_sid} to dispatch due to: {reason}")
+        
+        # Create TwiML for handoff
+        twiml = VoiceResponse()
+        await add_tts_or_say_to_twiml(
+            twiml, 
+            call_sid, 
+            "I'm having trouble understanding your request clearly. Let me connect you with our dispatch team who can better assist you."
+        )
+        twiml.dial(settings.DISPATCH_NUMBER)
+        
+        # Mark state to avoid further processing
+        st = call_info_store.setdefault(call_sid, {})
+        st["handoff_requested"] = True
+        st["handoff_reason"] = f"automatic_handoff: {reason}"
+        call_info_store[call_sid] = st
+        
+        # Clear dialog state
+        call_dialog_state.pop(call_sid, None)
+        
+        # Push the handoff TwiML
+        await push_twiml_to_call(call_sid, twiml)
+        
+        logger.info(f"✅ Automatic handoff completed for {call_sid}")
+        
+    except Exception as e:
+        logger.error(f"Failed to perform automatic handoff for {call_sid}: {e}")
+
+def _mark_progress(call_sid: str, progress_type: str, details: str = ""):
+    """Mark that meaningful progress has been made in the conversation"""
+    try:
+        cycle_tracking = speech_gate_cycle_tracking.get(call_sid, {})
+        if not cycle_tracking:
+            logger.info(f"🔍 No cycle tracking found for progress marking on {call_sid}")
+            return
+        
+        current_time = time.time()
+        cycle_tracking['last_progress_time'] = current_time
+        cycle_tracking['consecutive_no_progress'] = 0  # Reset counter
+        
+        logger.info(f"✅ PROGRESS MARKED for {call_sid}: {progress_type} - {details}")
+        logger.debug(f"   📊 Progress stats: consecutive_no_progress reset to 0, last_progress_time={current_time}")
+        
+    except Exception as e:
+        logger.error(f"Error marking progress for {call_sid}: {e}")
+
+def _mark_no_progress(call_sid: str, reason: str = ""):
+    """Mark that no progress was made in this cycle"""
+    try:
+        cycle_tracking = speech_gate_cycle_tracking.get(call_sid, {})
+        if not cycle_tracking:
+            logger.info(f"🔍 No cycle tracking found for no-progress marking on {call_sid}")
+            return
+        
+        cycle_tracking['consecutive_no_progress'] += 1
+        current_count = cycle_tracking['consecutive_no_progress']
+        
+        logger.info(f"❌ NO PROGRESS for {call_sid}: {reason} - consecutive_no_progress={current_count}")
+        logger.warning(f"🚨 NO PROGRESS DETECTED: {call_sid} has {current_count} consecutive cycles without progress")
+        
+    except Exception as e:
+        logger.error(f"Error marking no progress for {call_sid}: {e}")
 
 def get_natural_conversation_starter(text: str, dialog: dict, call_sid: str) -> str:
     """
@@ -2776,7 +3015,7 @@ def extract_name_from_text(text: str) -> str:
     # Common name introduction patterns
     name_patterns = [
         r"(?:my name is|i'm|i am|this is|it's|it is|call me)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",
-        r"^([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+?)(?:\s+here|$)",  # Simple name at start
+        r"^([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+?)(?:\s+here|[.,!?]?\s*$)",  # Simple name at start, with optional punctuation
         r"(?:i saw|i met|i know)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "I saw Daniel" type patterns
         r"(?:this is|that's|that is)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "This is Daniel" type patterns
         r"^(?:um|uh|well|so|like|just)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # Handle filler words before names
@@ -2792,7 +3031,8 @@ def extract_name_from_text(text: str) -> str:
                 'yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'calling', 'about',
                 'speaking', 'here', 'with', 'you', 'the', 'a', 'an', 'and',
                 'saw', 'met', 'know', 'is', 'that',
-                'thank', 'thanks', 'no', 'nope', 'nah'
+                'thank', 'thanks', 'no', 'nope', 'nah',
+                'um', 'uh', 'well', 'so', 'like', 'just'
             }
             # Check if any word in the name is in skip words
             name_words = name.lower().split()
@@ -2926,19 +3166,9 @@ def should_handoff_to_human(args: dict, confidence: dict, call_sid: str = None) 
     # Initialize handoff reasons for logging
     handoff_reasons = []
     
-    # Check single-instance thresholds first
-    single_instance_handoff = False
-    
-    if overall_confidence < settings.OVERALL_CONFIDENCE_THRESHOLD:
-        handoff_reasons.append(f"overall confidence {overall_confidence:.3f} < {settings.OVERALL_CONFIDENCE_THRESHOLD}")
-        single_instance_handoff = True
-    
-    if intent_confidence < settings.INTENT_CONFIDENCE_THRESHOLD:
-        handoff_reasons.append(f"intent confidence {intent_confidence:.3f} < {settings.INTENT_CONFIDENCE_THRESHOLD}")
-        single_instance_handoff = True
-    
     # Track consecutive failures if call_sid is provided
     consecutive_handoff = False
+    single_instance_handoff = False
     if call_sid:
         # Track intent confidence failures
         if intent_confidence < settings.INTENT_CONFIDENCE_THRESHOLD:
@@ -3478,6 +3708,28 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
     
     notes = intent.get('job', {}).get('description', '')
     
+    # If earlier stages determined a handoff is needed, transfer immediately
+    if intent.get('handoff_needed'):
+        try:
+            await add_tts_or_say_to_twiml(
+                twiml,
+                call_sid,
+                "I'm having trouble confidently handling this automatically. I'll connect you with our dispatcher now."
+            )
+        except Exception:
+            pass
+        # Dial dispatcher and return TwiML so caller pushes it
+        number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+        twiml.dial(number)
+        st = call_info_store.setdefault(call_sid, {})
+        st["handoff_requested"] = True
+        st["handoff_reason"] = "confidence_or_missing_fields"
+        call_info_store[call_sid] = st
+        # Clear dialog state to avoid further automation
+        call_dialog_state.pop(call_sid, None)
+        logger.info(f"🤝 Immediate transfer for {call_sid} due to handoff_needed=True (dispatcher {number})")
+        return twiml
+    
     # Add call context to notes
     if call_info.get('caller_name'):
         notes += f" [Caller: {call_info['caller_name']}]"
@@ -3508,6 +3760,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
     # Handle goodbye/closing statements
     if original_text and is_goodbye_statement(original_text):
         await add_tts_or_say_to_twiml(twiml, call_sid, "Thank you for calling SafeHarbour Plumbing Services. Have a great day!")
+        _mark_progress(call_sid, "goodbye_statement", "user ended call with goodbye")
         return twiml
     
     # Handle very low confidence or no clear service intent
@@ -3521,6 +3774,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         # Set state to await clearer intent
         call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_clear_intent'}
         append_stream_and_pause(twiml)
+        _mark_progress(call_sid, "clearer_intent_requested", "asked for clearer plumbing issue details")
         return twiml
 
     # If followup_text is provided, treat as user's response to scheduling prompt (no <Gather>, keep streaming)
@@ -3536,7 +3790,30 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
             else:
                 call_dialog_state[call_sid] = state
+            # Per-step attempts and escalation
+            effective_state = call_dialog_state.get(call_sid, {})
+            current_step = effective_state.get('step', 'unknown')
+            step_attempts = conversation_manager.increment_step_attempts(call_sid, current_step)
+            if conversation_manager.should_handoff_due_to_step_attempts(call_sid, current_step):
+                logger.info(f"🤝 HANDOFF: Too many attempts ({step_attempts}) at step '{current_step}' for {call_sid} - transferring to human dispatch")
+                try:
+                    await add_tts_or_say_to_twiml(
+                        twiml,
+                        call_sid,
+                        "I'm having trouble understanding. Let me connect you with our dispatch team who can better assist you."
+                    )
+                except Exception:
+                    pass
+                number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+                twiml.dial(number)
+                st = call_info_store.setdefault(call_sid, {})
+                st["handoff_requested"] = True
+                st["handoff_reason"] = f"too_many_attempts_{current_step}"
+                call_info_store[call_sid] = st
+                call_dialog_state.pop(call_sid, None)
+                return twiml
             append_stream_and_pause(twiml)
+            _mark_no_progress(call_sid, f"noise_or_unknown: {text_norm}")
             return twiml
         
         # Handle awaiting_clear_intent step - user responding to clarification request
@@ -3643,6 +3920,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
             
             append_stream_and_pause(twiml)
+            _mark_progress(call_sid, "problem_details_collected", f"collected detailed problem description: {followup_text[:50]}...")
             return twiml
         
         # New: awaiting_location_confirm step
@@ -3746,6 +4024,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 logger.info(f"✅ YES DETECTED: User confirmed appointment for {call_sid} with response: '{followup_text}'")
                 # Reset clarification attempts on successful confirmation
                 conversation_manager.reset_clarification_attempts(call_sid)
+                conversation_manager.reset_step_attempts(call_sid, 'awaiting_time_confirm')
                 # User said YES - proceed to operator
                 suggested_time = state.get('suggested_time')
                 if isinstance(suggested_time, datetime):
@@ -3757,20 +4036,39 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     twiml.hangup()
                     state['step'] = 'awaiting_operator_confirm'
                     call_dialog_state[call_sid] = state
+                    _mark_progress(call_sid, "appointment_confirmed", f"user confirmed appointment for {_format_slot(suggested_time)}")
                     return twiml
             elif is_strict_negative_response(followup_text):
                 logger.info(f"❌ NO DETECTED: User declined appointment for {call_sid} with response: '{followup_text}'")
                 # Reset clarification attempts on clear negative response
                 conversation_manager.reset_clarification_attempts(call_sid)
+                conversation_manager.reset_step_attempts(call_sid, 'awaiting_time_confirm')
                 # User said NO - go back to scheduling
                 await add_tts_or_say_to_twiml(twiml, call_sid, "No problem. What date and time works better?")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
                 append_stream_and_pause(twiml)
+                _mark_progress(call_sid, "appointment_declined", "user declined appointment, asking for different time")
                 return twiml
             else:
                 # Ambiguous response - check clarification attempts before asking again
                 clarification_count = conversation_manager.increment_clarification_attempts(call_sid)
                 logger.info(f"❓ AMBIGUOUS RESPONSE: User response '{followup_text}' for {call_sid} was not clearly yes or no - clarification attempt #{clarification_count}")
+                # Also track per-step attempts for awaiting_time_confirm
+                step_attempts = conversation_manager.increment_step_attempts(call_sid, 'awaiting_time_confirm')
+                if conversation_manager.should_handoff_due_to_step_attempts(call_sid, 'awaiting_time_confirm'):
+                    logger.info(f"🤝 HANDOFF: Too many attempts ({step_attempts}) at step 'awaiting_time_confirm' for {call_sid} - transferring to human dispatch")
+                    try:
+                        await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble understanding your response. Let me connect you with our dispatch team who can help you schedule your appointment.")
+                    except Exception:
+                        pass
+                    number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+                    twiml.dial(number)
+                    st = call_info_store.setdefault(call_sid, {})
+                    st["handoff_requested"] = True
+                    st["handoff_reason"] = "too_many_attempts_awaiting_time_confirm"
+                    call_info_store[call_sid] = st
+                    call_dialog_state.pop(call_sid, None)
+                    return twiml
                 
                 # If we've asked for clarification too many times, transfer to human dispatch
                 if conversation_manager.should_handoff_due_to_clarification_attempts(call_sid):
@@ -3782,12 +4080,12 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     call_dialog_state[call_sid] = state
                     append_stream_and_pause(twiml)
                     return twiml
-                
-                # Ask for clarification with clear instructions
-                suggested_time = state.get('suggested_time')
-                if isinstance(suggested_time, datetime):
-                    await add_tts_or_say_to_twiml(twiml, call_sid, f"I need a clear answer. Do you want the appointment at {_format_slot(suggested_time)}? Please say exactly YES if you want it, or NO if you don't.")
-                    # Keep the same state - they stay in confirmation mode
+                else:
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble understanding your response. Let me connect you with our dispatch team who can help you schedule your appointment.")
+                    # Reset attempts and transition to operator handoff
+                    conversation_manager.reset_step_attempts(call_sid, 'awaiting_operator_confirm')
+                    state['step'] = 'awaiting_operator_confirm'
+                    call_dialog_state[call_sid] = state
                     append_stream_and_pause(twiml)
                     return twiml
             # If user provided a new date/time at confirmation step, re-parse and re-suggest
@@ -3854,12 +4152,16 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
                 append_stream_and_pause(twiml)
                 logger.info(f"Handled path choice (emergency) for CallSid={call_sid}")
+                _mark_progress(call_sid, "emergency_path_chosen", f"user chose emergency path for {job_type}")
                 return twiml
             elif any(k in text_norm for k in ['schedule', 'book', 'technician', 'come check', 'come out', 'appointment']):
                 await add_tts_or_say_to_twiml(twiml, call_sid, f"Great. Tell me your preferred time, or say 'earliest'.")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+                # Reset attempts for previous step and proceed
+                conversation_manager.reset_step_attempts(call_sid, 'awaiting_path_choice')
                 append_stream_and_pause(twiml)
                 logger.info(f"Handled path choice (schedule) for CallSid={call_sid}")
+                _mark_progress(call_sid, "schedule_path_chosen", f"user chose schedule path for {job_type}")
                 return twiml
         # If user gives a date/time directly, recognize but don't book yet
         try:
@@ -3893,14 +4195,36 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
                 append_stream_and_pause(twiml)
                 logger.info(f"Handled followup date/time recognition for CallSid={call_sid}")
+                _mark_progress(call_sid, "date_time_recognized", f"recognized date/time: {preferred_time}")
                 return twiml
         except Exception as e:
             logger.error(f"Datetime parsing failed: {e}")
         # Prompt again if nothing parsed
         await add_tts_or_say_to_twiml(twiml, call_sid, "Please say a date and time, like 'Friday at 3 PM', or say 'earliest'.")
         call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+        # Per-step attempts and escalation for awaiting_time
+        step_attempts = conversation_manager.increment_step_attempts(call_sid, 'awaiting_time')
+        if conversation_manager.should_handoff_due_to_step_attempts(call_sid, 'awaiting_time'):
+            logger.info(f"🤝 HANDOFF: Too many attempts ({step_attempts}) at step 'awaiting_time' for {call_sid} - transferring to human dispatch")
+            try:
+                await add_tts_or_say_to_twiml(
+                    twiml,
+                    call_sid,
+                    "I'm having trouble scheduling via voice. Let me connect you with our dispatcher who can help schedule your appointment."
+                )
+            except Exception:
+                pass
+            number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+            twiml.dial(number)
+            st = call_info_store.setdefault(call_sid, {})
+            st["handoff_requested"] = True
+            st["handoff_reason"] = "too_many_attempts_awaiting_time"
+            call_info_store[call_sid] = st
+            call_dialog_state.pop(call_sid, None)
+            return twiml
         append_stream_and_pause(twiml)
         logger.info(f"Handled followup prompting for CallSid={call_sid}")
+        _mark_no_progress(call_sid, "could not parse date/time, prompting again")
         return twiml
 
     # Initial intent handling (no <Gather>; we keep streaming and listen continuously)
@@ -3917,10 +4241,13 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             ok = True
             await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Do you want this time? Please say YES or NO.")
             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
+            _mark_progress(call_sid, "emergency_slot_suggested", f"suggested emergency slot: {_format_slot(suggested)}")
+            conversation_manager.reset_step_attempts(call_sid, 'awaiting_path_choice')
         except Exception as e:
             logger.error(f"Emergency slot suggestion failed: {e}")
             await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
+            _mark_no_progress(call_sid, "emergency slot suggestion failed")
     else:
         # Check if we need to ask for problem details first
         dialog = call_dialog_state.get(call_sid, {})
@@ -3932,6 +4259,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 f"Tell me more about your {_speakable(job_type)}, specifically how and when it started."
             )
             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_problem_details', 'problem_details_asked': True}
+            _mark_progress(call_sid, "problem_details_requested_initial", f"asked for problem details for {job_type}")
         else:
             # Problem details already collected, proceed to path choice
             await add_tts_or_say_to_twiml(
@@ -3940,974 +4268,1105 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 f"Got it. For your {_speakable(job_type)}, is this an emergency, or would you like to book a technician to come check it out?"
             )
             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
-    append_stream_and_pause(twiml)
-    logger.info(f"Handled intent {intent} for CallSid={call_sid}")
-    return twiml
+            _mark_progress(call_sid, "path_choice_requested", f"asked for emergency vs schedule choice for {job_type}")
+            conversation_manager.reset_step_attempts(call_sid, 'awaiting_time')
+        append_stream_and_pause(twiml)
+        logger.info(f"Handled intent {intent} for CallSid={call_sid}")
+        _mark_progress(call_sid, "intent_handled_final", f"completed intent handling for {job_type}")
+        return twiml
 
-# Watchdog to ensure streaming begins; re-push TwiML if no media seen soon
-async def streaming_watchdog(call_sid: str, delay_seconds: float = 5.0):
+    # Otherwise, extract a fresh intent with parallel processing for speed
+    if FAST_RESPONSE_MODE:
+        # Run intent extraction and time parsing in parallel
+        intent_task = asyncio.create_task(extract_intent_from_text(call_sid, text))
+        time_task = asyncio.create_task(_parse_time_parallel(text))
+        intent, (explicit_time, explicit_emergency) = await asyncio.gather(intent_task, time_task)
+    else:
+        intent = await extract_intent_from_text(call_sid, text)
+        explicit_time = parse_human_datetime(text) or gpt_infer_datetime_phrase(text)
+        explicit_emergency = contains_emergency_keywords(text)
+    
+    # NEW: Mark progress if we successfully extracted intent
+    if intent and intent.get('job', {}).get('type'):
+        _mark_progress(call_sid, "intent_extracted", f"extracted job type: {intent.get('job', {}).get('type')}")
+    else:
+        _mark_no_progress(call_sid, "failed to extract meaningful intent")
+    
+    # Check if this is a plumbing issue and we haven't asked for problem details yet
+    info = call_info_store.get(call_sid, {})
+    segments_count = int(info.get('segments_count', 0)) + 1
+    info['segments_count'] = segments_count
+    call_info_store[call_sid] = info
+    
+    dialog = call_dialog_state.get(call_sid, {})
+    
+    # Accumulate audio for the entire call and save to step1 directory
     try:
-        await asyncio.sleep(delay_seconds)
-        info = call_info_store.get(call_sid, {})
-        last_media_time = info.get('last_media_time')
-        start_ts = info.get('start_ts', 0)
-        has_conn = call_sid in manager.active_connections
-        if has_conn and (not last_media_time or last_media_time < start_ts):
-            logger.info(f"🛡️ Watchdog: no media received for {call_sid} after {delay_seconds:.0f}s; re-pushing TwiML to restart streaming")
-            resp = VoiceResponse()
-            start = Start()
-            wss_url = _build_wss_url_for_resume(call_sid)
-            start.stream(url=wss_url, track="inbound_track")
-            resp.append(start)
-            resp.pause(length=3600)
-            await push_twiml_to_call(call_sid, resp)
+        import os
+        import time
+        from datetime import datetime
+        
+        # Create step1 directory if it doesn't exist
+        step1_dir = "step1"
+        os.makedirs(step1_dir, exist_ok=True)
+        
+        # Get or create the accumulated audio buffer for this call
+        if 'accumulated_audio' not in call_info_store.get(call_sid, {}):
+            call_info_store[call_sid] = call_info_store.get(call_sid, {})
+            call_info_store[call_sid]['accumulated_audio'] = bytearray()
+        
+        # Get the most recent audio data for this call
+        vad_state = vad_states.get(call_sid, {})
+        if vad_state.get('pending_audio'):
+            audio_data = bytes(vad_state['pending_audio'])
         else:
-            logger.debug(f"Watchdog: media already flowing for {call_sid}; no action needed")
+            # Fallback: try to get from audio buffers
+            audio_data = bytes(audio_buffers.get(call_sid, bytearray()))
+        
+        if audio_data:
+            # Add this audio segment to the accumulated buffer
+            call_info_store[call_sid]['accumulated_audio'].extend(audio_data)
+            
+            # Save the accumulated audio to file
+            accumulated_audio = bytes(call_info_store[call_sid]['accumulated_audio'])
+            filename = f"{step1_dir}/step1_{call_sid}.wav"
+            
+            # Convert to WAV and save
+            sample_rate = audio_config_store.get(call_sid, {}).get('sample_rate', SAMPLE_RATE_DEFAULT)
+            wav_bytes = pcm_to_wav_bytes(accumulated_audio, sample_rate)
+            
+            with open(filename, 'wb') as f:
+                f.write(wav_bytes)
+            
+            logger.info(f"💾 Updated step1 audio for {call_sid} to {filename} (total: {len(accumulated_audio)} bytes)")
+        else:
+            logger.warning(f"⚠️ No audio data available to accumulate for {call_sid}")
+            
     except Exception as e:
-        logger.error(f"Watchdog error for {call_sid}: {e}")
-
-# Finalize metrics aggregation for a call
-
-def _finalize_call_metrics(call_sid: str) -> None:
-    try:
-        info = call_info_store.get(call_sid)
-        if not info:
-            return
-        if info.get('_finalized'):
-            return
-        end_ts = time.time()
-        start_ts = float(info.get('start_ts') or end_ts)
-        duration = max(0.0, end_ts - start_ts)
-        # Abandoned if no media was received
-        answered = bool(info.get('first_media_ts')) or bool(vad_states.get(call_sid, {}).get('has_received_media'))
-        if not answered:
-            try:
-                ops_metrics_state["abandoned_calls"] = int(ops_metrics_state.get("abandoned_calls", 0)) + 1
-            except Exception:
-                ops_metrics_state["abandoned_calls"] = 1
-        try:
-            ops_metrics_state["handle_times_sec"].append(duration)
-        except Exception:
-            pass
-        # Record into recent history
-        try:
-            rec = {
-                "call_sid": call_sid,
-                "from": info.get("from"),
-                "to": info.get("to"),
-                "start_ts": start_ts,
-                "end_ts": end_ts,
-                "duration_sec": duration,
-                "answered": answered,
-                "answer_time_sec": max(0.0, float(info.get('first_media_ts') - start_ts)) if info.get('first_media_ts') else None,
-            }
-            ops_metrics_state["call_history"].append(rec)
-        except Exception:
-            pass
-        info['_finalized'] = True
-        call_info_store[call_sid] = info
-    except Exception as e:
-        logger.debug(f"Finalize metrics failed for {call_sid}: {e}")
-
-#---------------AUDIO PROCESSING---------------
-def pcm_to_wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
-    """Wrap raw PCM into a WAV container for Whisper."""
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(SAMPLE_WIDTH)
-        wf.setframerate(sample_rate)
-        wf.writeframes(pcm)
-    return buf.getvalue()
-
-def contains_emergency_keywords(text: str) -> bool:
-    norm = " ".join((text or "").lower().split())
-    keywords = [
-        "emergency",
-        "burst pipe",
-        "pipe burst",
-        "water everywhere",
-        "flooding",
-        "sewage",
-        "sewer backup",
-        "gas leak",
-    ]
-    for k in keywords:
-        if k in norm:
-            return True
-    return False
-
-#---------------MAIN---------------
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "phone:app",
-        host=settings.SERVER_HOST,
-        port=settings.SERVER_PORT,
-        ssl_keyfile=settings.SSL_KEY_PATH,
-        ssl_certfile=settings.SSL_CERT_FILE,
-        log_level=settings.LOG_LEVEL.lower()
-    )
-
-# Heuristic: detect noise/unknown utterances with no recognizable intent cues
-def is_noise_or_unknown(text: str) -> bool:
-    norm = " ".join((text or "").lower().strip().strip(".,!?").split())
-    if not norm:
-        return True
-    # If affirmative/negative or contains path/time cues, it's not noise
-    if is_affirmative_response(norm) or is_negative_response(norm):
-        return False
-    # Common scheduling and intent cue words
-    cue_words = {
-        'emergency','urgent','immediately','schedule','book','appointment','technician','today','tomorrow','tonight',
-        'morning','afternoon','evening','am','pm','earliest','soon','asap','next','this','monday','tuesday','wednesday','thursday','friday','saturday','sunday'
-    }
-    tokens = set(norm.split())
-    if tokens & cue_words:
-        return False
-    # Accept explicit time-like expressions (e.g., 3 pm, 10:30 am)
-    if re.search(r"\b\d{1,2}(:\d{2})?\s*(am|pm)\b", norm):
-        return False
-    # Treat URLs/domains and review chatter as noise
-    if re.search(r"(https?://|www\.|\.[a-z]{2,6}\b)", norm) or 'pissedconsumer' in norm or 'review' in norm:
-        return True
-    # Single very short/uncommon word → treat as noise
-    return len(tokens) <= 2
-
-# Transfer intent detection
-def is_transfer_request(text: str) -> bool:
-    norm = " ".join((text or "").lower().strip().split())
-    # Keywords that indicate a transfer request
-    transfer_keywords = [
-        "transfer", "transfer me", "dispatcher", "operator", "human", "representative", "agent"
-    ]
-    return any(k in norm for k in transfer_keywords)
-
-async def perform_dispatch_transfer(call_sid: str) -> None:
-    try:
-        number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+        logger.error(f"Failed to save step1 audio for {call_sid}: {e}")
+    
+    # Check if this is a plumbing issue and we haven't asked for problem details yet
+    job_type = intent.get('job', {}).get('type', '')
+    is_plumbing_issue = job_type and job_type != 'general_inquiry'
+    
+    # Debug logging to understand why problem details question isn't being asked
+    logger.info(f"🔍 DEBUG: Checking problem details condition for {call_sid}:")
+    logger.info(f"   - is_plumbing_issue: {is_plumbing_issue}")
+    logger.info(f"   - job_type: {job_type}")
+    logger.info(f"   - explicit_time: {explicit_time}")
+    logger.info(f"   - explicit_emergency: {explicit_emergency}")
+    logger.info(f"   - is_affirmative_response: {is_affirmative_response(text)}")
+    logger.info(f"   - problem_details_asked: {dialog.get('problem_details_asked')}")
+    logger.info(f"   - dialog state: {dialog}")
+    
+    if (is_plumbing_issue and 
+        not explicit_time and 
+        not explicit_emergency and 
+        not dialog.get('problem_details_asked')):
+        
+        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_problem_details', 'problem_details_asked': True}
+        logger.info(f"🔍 ASKING FOR PROBLEM DETAILS: Plumbing issue identified from {call_sid} - asking specifically how and when it started")
         twiml = VoiceResponse()
-        # Minimal prompt then transfer
+        await add_tts_or_say_to_twiml(
+            twiml,
+            call_sid,
+            f"Tell me more about your {_speakable(job_type)}, specifically how and when it started."
+        )
+        start = Start()
+        wss_url = _build_wss_url_for_resume(call_sid)
+        start.stream(url=wss_url, track="inbound_track")
+        twiml.append(start)
+        twiml.pause(length=3600)
+        await push_twiml_to_call(call_sid, twiml)
+        _mark_progress(call_sid, "problem_details_requested", f"asked for details about {job_type}")
+        return
+    
+    # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
+    if (segments_count < 2 and not explicit_time and not explicit_emergency and 
+        not is_affirmative_response(text)):
+        # Don't set any step yet - just continue listening
+        logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
+        _mark_no_progress(call_sid, f"deferring prompt - segments={segments_count}, no explicit signals")
+        return
+    twiml = await handle_intent(call_sid, intent)
+    await push_twiml_to_call(call_sid, twiml)
+    _mark_progress(call_sid, "intent_handled", f"processed intent: {intent.get('job', {}).get('type', 'unknown')}")
+
+async def extract_intent_from_text(call_sid: str, text:str) -> dict:
+   # Enhanced prompt with better context and examples
+   enhanced_prompt = f"""
+You are a plumbing service booking assistant. Extract structured information from customer requests.
+
+CUSTOMER REQUEST: "{text}"
+
+INSTRUCTIONS:
+1. Identify the specific plumbing job type from the comprehensive list of services
+2. Determine urgency: emergency (immediate), same_day (today), flex (anytime)
+3. Extract customer name and contact info
+4. Parse address information
+5. Assess confidence and handoff needs
+
+EXAMPLES:
+- "kitchen sink is clogged" → job_type: clogged_kitchen_sink
+- "bathroom sink won't drain" → job_type: clogged_bathroom_sink
+- "toilet is running constantly" → job_type: running_toilet
+- "water heater burst" → job_type: water_heater_repair, urgency: emergency
+- "need new faucet installed" → job_type: faucet_replacement
+- "sewer camera inspection" → job_type: camera_inspection
+- "drain smells bad" → job_type: camera_inspection
+- "can come tomorrow" → urgency: flex
+- "need today" → urgency: same_day
+- "emergency leak" → urgency: emergency
+
+Be precise and extract all available information. Match to the most specific service type available.
+"""
+
+   # Send user text to ChatCompletion with function calling
+   resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": enhanced_prompt}],
+        tools=FUNCTIONS,
+        tool_choice="auto",
+        temperature=0.1,  # Lower temperature for more consistent results
+        max_tokens=1000
+   )
+   msg = resp.choices[0].message
+   if msg.tool_calls:
+    tool_call = msg.tool_calls[0]
+    args = json.loads(tool_call.function.arguments)
+    
+    # Post-process and validate the extracted data
+    validated_args = validate_and_enhance_extraction(args, text, call_sid)
+    return validated_args
+
+   # Fallback: no function call, return freeform description
+   return create_fallback_response(text)
+
+def validate_and_enhance_extraction(args: dict, original_text: str, call_sid: str = None) -> dict:
+    """Validate and enhance extracted data with additional processing"""
+    
+    # Ensure required fields exist
+    if 'intent' not in args:
+        args['intent'] = 'BOOK_JOB'
+    
+    # Calculate intent confidence for the original text
+    try:
+        # Use the same intent classification system for confidence
+        import asyncio
+        if asyncio.iscoroutinefunction(classify_transcript_intent):
+            # If in async context, calculate intent confidence
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Schedule intent confidence calculation
+                intent_confidence = 0.7  # Default for now, will be calculated properly
+            else:
+                intent, intent_confidence = loop.run_until_complete(classify_transcript_intent(original_text))
+        else:
+            intent_confidence = 0.7  # Default fallback
+    except:
+        intent_confidence = 0.7  # Default fallback if async context issues
+    
+    # Enhance job type recognition with keyword matching and multi-intent detection
+    multi_intent_result = infer_multiple_job_types_from_text(original_text)
+    
+    if not args.get('job', {}).get('type'):
+        args['job'] = args.get('job', {})
+        args['job']['type'] = multi_intent_result['primary'] or infer_job_type_from_text(original_text)
+    
+    # Add secondary intents if detected
+    if multi_intent_result['secondary']:
+        args['job']['secondary_intents'] = multi_intent_result['secondary']
+    
+    # Enhance description with secondary intents
+    if multi_intent_result['description_suffix']:
+        current_description = args.get('job', {}).get('description', '')
+        if current_description:
+            # Add suffix with a space separator
+            args['job']['description'] = f"{current_description} {multi_intent_result['description_suffix']}"
+        else:
+            # Create a basic description with the detected intents
+            args['job']['description'] = multi_intent_result['description_suffix']
+    
+    # Improve urgency classification
+    if not args.get('job', {}).get('urgency'):
+        args['job']['urgency'] = infer_urgency_from_text(original_text)
+    
+    # Extract phone numbers if missing
+    if not args.get('customer', {}).get('phone'):
+        phone = extract_phone_number(original_text)
+        if phone:
+            args['customer'] = args.get('customer', {})
+            args['customer']['phone'] = phone
+    
+    # Include collected customer name from dialog state
+    if call_sid:
+        dialog = call_dialog_state.get(call_sid, {})
+        customer_name = dialog.get('customer_name')
+        if customer_name and not args.get('customer', {}).get('name'):
+            args['customer'] = args.get('customer', {})
+            args['customer']['name'] = customer_name
+    
+    # Enhance address extraction
+    if not args.get('location', {}).get('raw_address'):
+        address = extract_address(original_text)
+        if address:
+            args['location'] = args.get('location', {})
+            args['location']['raw_address'] = address
+    
+    # Calculate confidence scores with intent confidence
+    confidence = calculate_confidence_scores(args, original_text, intent_confidence)
+    args['confidence'] = confidence
+    
+    # Determine handoff based on confidence and completeness
+    args['handoff_needed'] = should_handoff_to_human(args, confidence, call_sid)
+    
+    return args
+
+
+
+def infer_urgency_from_text(text: str) -> str:
+    """Infer urgency from text using keyword matching"""
+    text_lower = text.lower()
+    
+    # Emergency indicators
+    if any(word in text_lower for word in ['emergency', 'burst', 'flooding', 'water everywhere', 'immediately', 'urgent']):
+        return 'emergency'
+    
+    # Same day indicators
+    if any(word in text_lower for word in ['today', 'asap', 'soon', 'quickly', 'urgent']):
+        return 'same_day'
+    
+    # Flexible indicators
+    if any(word in text_lower for word in ['tomorrow', 'next week', 'when convenient', 'schedule', 'appointment']):
+        return 'flex'
+    
+    return 'flex'  # Default to flexible
+
+# TTS: synthesize with ElevenLabs or OpenAI 4o TTS
+async def synthesize_tts(text: str) -> Optional[bytes]:
+    # Check if ElevenLabs TTS is enabled and configured
+    if (settings.USE_ELEVENLABS_TTS and 
+        settings.ELEVENLABS_API_KEY and 
+        settings.ELEVENLABS_VOICE_ID):
         try:
-            twiml.say("Connecting you to our dispatcher now.")
-        except Exception:
-            pass
-        twiml.dial(number)
+            from elevenlabs import ElevenLabs
+            
+            # Create ElevenLabs client with API key
+            elevenlabs_client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
+            
+            # Use configured voice ID or default to the specified one
+            voice_id = settings.ELEVENLABS_VOICE_ID
+            model_id = settings.ELEVENLABS_MODEL_ID or "eleven_multilingual_v2"
+            
+            # Generate audio using ElevenLabs
+            logger.info(f"🎤 Using ElevenLabs TTS (voice: {voice_id}, model: {model_id})")
+            audio_stream = elevenlabs_client.text_to_speech.convert(
+                voice_id=voice_id,
+                text=text,
+                model_id=model_id
+            )
+            
+            # Convert iterator to bytes
+            audio = b"".join(audio_stream)
+            
+            if audio:
+                logger.debug(f"ElevenLabs TTS generated {len(audio)} bytes for text: {text[:50]}...")
+                return audio
+            else:
+                logger.error("ElevenLabs TTS returned empty response")
+                
+        except Exception as e:
+            logger.error(f"ElevenLabs TTS failed: {e}")
+            logger.info("Falling back to OpenAI TTS...")
+    
+    # If ElevenLabs is disabled or not configured, use OpenAI TTS
+    if not settings.USE_ELEVENLABS_TTS:
+        logger.info("🎤 ElevenLabs TTS disabled via USE_ELEVENLABS_TTS=False, using OpenAI TTS")
+    
+    # Use OpenAI TTS (either as fallback or primary choice)
+    try:
+        # Use the existing global OpenAI client
+        voice = getattr(settings, 'OPENAI_TTS_VOICE', 'alloy')  # Default to 'alloy' voice
+        model = getattr(settings, 'OPENAI_TTS_MODEL', 'tts-1')  # Default to 'tts-1' model
+        speed = settings.OPENAI_TTS_SPEED  # Use configured speed (0.25 to 4.0)
+        
+        logger.info(f"🎤 Using OpenAI TTS (voice: {voice}, model: {model}, speed: {speed})")
+        
+        response = client.audio.speech.create(
+            model=model,
+            voice=voice,
+            input=text,
+            response_format="mp3",
+            speed=speed
+        )
+        
+        # Convert response to bytes
+        audio_content = b""
+        for chunk in response.iter_bytes():
+            audio_content += chunk
+            
+        if audio_content:
+            logger.debug(f"OpenAI TTS generated {len(audio_content)} bytes for text: {text[:50]}...")
+            return audio_content
+        else:
+            logger.error("OpenAI TTS returned empty response")
+            return None
+            
+    except Exception as e:
+        logger.error(f"OpenAI TTS failed: {e}")
+        return None
+
+async def _activate_speech_gate(call_sid: str, text: str):
+    """Activate speech gate to prevent user speech processing during bot TTS output"""
+    logger.info(f"🔇 ACTIVATING SPEECH GATE for {call_sid} with text length: {len(text)}")
+    try:
+        # Ensure vad_state exists
+        if call_sid not in vad_states:
+            vad_states[call_sid] = {
+                'speech_gate_active': False,
+                'bot_speaking': False,
+                'is_speaking': False,
+                'pending_audio': bytearray(),
+                'stream_start_time': time.time(),
+                'has_received_media': False,
+            }
+            logger.info(f"🔄 Initialized vad_state for {call_sid}")
+        
+        vad_state = vad_states[call_sid]
+        current_time = time.time()
+        
+        # OPTIMIZED: Much more aggressive timing for faster responses
+        # Use character count instead of word count for better accuracy
+        char_count = len(text)
+        # Estimate ~15 chars per second at 1.5x speed (much faster calculation)
+        base_duration = char_count / (15 * settings.OPENAI_TTS_SPEED)
+        
+        # Cap maximum gate duration to prevent long blocks
+        max_gate_duration = 3.0  # Never block longer than 3 seconds
+        actual_duration = min(base_duration, max_gate_duration)
+        
+        # Minimal buffer time for speed
+        buffer_time = 0.3  # Reduced from 0.5s
+        gate_duration = actual_duration + buffer_time
+        
+        # Activate the speech gate
+        vad_state['speech_gate_active'] = True
+        vad_state['bot_speaking'] = True
+        vad_state['bot_speech_start_time'] = current_time
+        
+        # NEW: Track speech gate cycle for comprehensive handoff detection
+        # Ensure tracking is properly initialized
+        if call_sid not in speech_gate_cycle_tracking:
+            speech_gate_cycle_tracking[call_sid] = {
+                'total_cycles': 0,
+                'consecutive_no_progress': 0,
+                'last_progress_time': 0,
+                'last_speech_gate_time': 0,
+                'last_processed_text': '',
+                'last_intent_extracted': None,
+                'last_dialog_step': '',
+                'call_start_time': current_time,
+                'max_cycles_without_progress': 3,
+                'max_call_duration_without_progress': 120,
+            }
+            logger.info(f"🔄 Initialized speech gate cycle tracking for {call_sid}")
+        else:
+            logger.info(f"🔄 Using existing speech gate cycle tracking for {call_sid}")
+        
+        cycle_tracking = speech_gate_cycle_tracking[call_sid]
+        cycle_tracking['total_cycles'] += 1
+        cycle_tracking['last_speech_gate_time'] = current_time
+        
+        # Initialize call start time if not set
+        if cycle_tracking['call_start_time'] == 0:
+            cycle_tracking['call_start_time'] = current_time
+        
+        logger.info(f"🔇 Speech gate activated for {call_sid}: {gate_duration:.2f}s (text: {len(text)} chars) - Cycle #{cycle_tracking['total_cycles']} (no_progress: {cycle_tracking['consecutive_no_progress']})")
+        
+        # Schedule gate deactivation with shorter delay for more responsive listening
+        asyncio.create_task(_deactivate_speech_gate_after_delay(call_sid, gate_duration))
+        
+    except Exception as e:
+        logger.error(f"Failed to activate speech gate for {call_sid}: {e}")
+
+async def _deactivate_speech_gate_after_delay(call_sid: str, delay: float):
+    """Deactivate speech gate after estimated TTS completion"""
+    try:
+        await asyncio.sleep(delay)
+        
+        vad_state = vad_states.get(call_sid)
+        if vad_state:
+            vad_state['speech_gate_active'] = False
+            vad_state['bot_speaking'] = False
+            logger.info(f"🔊 Speech gate deactivated for {call_sid} after {delay:.2f}s")
+            
+            # Clear any accumulated audio during gate period to avoid processing stale audio
+            if vad_state.get('is_speaking'):
+                vad_state['is_speaking'] = False
+                vad_state['pending_audio'] = bytearray()
+                logger.debug(f"Cleared pending audio for {call_sid} after speech gate")
+            
+            # NEW: Check for handoff conditions after speech gate deactivation
+            logger.info(f"🔍 Checking handoff conditions after speech gate deactivation for {call_sid}")
+            await _check_speech_gate_handoff_conditions(call_sid)
+                
+    except Exception as e:
+        logger.error(f"Failed to deactivate speech gate for {call_sid}: {e}")
+
+async def _check_speech_gate_handoff_conditions(call_sid: str):
+    """Check if handoff is needed based on speech gate cycle tracking"""
+    try:
+        cycle_tracking = speech_gate_cycle_tracking.get(call_sid, {})
+        if not cycle_tracking:
+            logger.info(f"🔍 No cycle tracking found for {call_sid}")
+            return
+        
+        logger.info(f"🔍 Checking handoff conditions for {call_sid}: cycles={cycle_tracking.get('total_cycles', 0)}, no_progress={cycle_tracking.get('consecutive_no_progress', 0)}")
+        
+        current_time = time.time()
+        total_cycles = cycle_tracking.get('total_cycles', 0)
+        consecutive_no_progress = cycle_tracking.get('consecutive_no_progress', 0)
+        last_progress_time = cycle_tracking.get('last_progress_time', 0)
+        call_start_time = cycle_tracking.get('call_start_time', current_time)
+        max_cycles = cycle_tracking.get('max_cycles_without_progress', 3)
+        max_duration = cycle_tracking.get('max_call_duration_without_progress', 120)
+        
+        # Calculate time since last progress
+        time_since_progress = current_time - last_progress_time if last_progress_time > 0 else current_time - call_start_time
+        call_duration = current_time - call_start_time
+        
+        # Check handoff conditions
+        handoff_reasons = []
+        
+        # Condition 1: Too many consecutive cycles without progress
+        if consecutive_no_progress >= max_cycles:
+            handoff_reasons.append(f"{consecutive_no_progress} consecutive cycles without progress >= {max_cycles}")
+        
+        # Condition 2: Too much time without progress
+        if time_since_progress >= max_duration:
+            handoff_reasons.append(f"{time_since_progress:.1f}s without progress >= {max_duration}s")
+        
+        # Condition 3: Call has been going too long without meaningful progress
+        if call_duration >= max_duration * 2 and consecutive_no_progress >= 2:
+            handoff_reasons.append(f"call duration {call_duration:.1f}s with {consecutive_no_progress} cycles without progress")
+        
+        if handoff_reasons:
+            reasons_str = ", ".join(handoff_reasons)
+            logger.warning(f"🚨 SPEECH GATE HANDOFF TRIGGERED for {call_sid}: {reasons_str}")
+            logger.warning(f"   📊 Cycle stats: total={total_cycles}, no_progress={consecutive_no_progress}, time_since_progress={time_since_progress:.1f}s")
+            logger.error(f"🚨 AUTOMATIC HANDOFF REQUIRED: {call_sid} will be transferred to dispatch")
+            
+            # Perform automatic handoff to dispatch
+            await _perform_automatic_handoff(call_sid, f"speech_gate_cycles: {reasons_str}")
+        
+    except Exception as e:
+        logger.error(f"Error checking speech gate handoff conditions for {call_sid}: {e}")
+
+async def _perform_automatic_handoff(call_sid: str, reason: str):
+    """Perform automatic handoff to dispatch due to speech gate cycle failures"""
+    try:
+        logger.info(f"🤖 AUTOMATIC HANDOFF: Transferring {call_sid} to dispatch due to: {reason}")
+        
+        # Create TwiML for handoff
+        twiml = VoiceResponse()
+        await add_tts_or_say_to_twiml(
+            twiml, 
+            call_sid, 
+            "I'm having trouble understanding your request clearly. Let me connect you with our dispatch team who can better assist you."
+        )
+        twiml.dial(settings.DISPATCH_NUMBER)
+        
         # Mark state to avoid further processing
         st = call_info_store.setdefault(call_sid, {})
         st["handoff_requested"] = True
-        st["handoff_reason"] = "user_requested_transfer"
+        st["handoff_reason"] = f"automatic_handoff: {reason}"
         call_info_store[call_sid] = st
+        
+        # Clear dialog state
+        call_dialog_state.pop(call_sid, None)
+        
+        # Push the handoff TwiML
         await push_twiml_to_call(call_sid, twiml)
-        logger.info(f"📞 Initiated transfer for {call_sid} to dispatcher {number}")
+        
+        logger.info(f"✅ Automatic handoff completed for {call_sid}")
+        
     except Exception as e:
-        logger.error(f"Failed to perform dispatch transfer for {call_sid}: {e}")
+        logger.error(f"Failed to perform automatic handoff for {call_sid}: {e}")
 
-# Escalation helpers for unclear intents
-
-def get_call_state(call_sid: str) -> dict:
-    st = call_info_store.setdefault(call_sid, {})
-    st.setdefault("unclear_intent_attempts", 0)
-    st.setdefault("handoff_requested", False)
-    st.setdefault("handoff_reason", None)
-    return st
-
-def mark_handoff(call_sid: str, reason: str) -> None:
-    st = get_call_state(call_sid)
-    st["handoff_requested"] = True
-    st["handoff_reason"] = reason
-    call_info_store[call_sid] = st
-
-def increment_unclear_attempts(call_sid: str) -> int:
-    st = get_call_state(call_sid)
-    st["unclear_intent_attempts"] = int(st.get("unclear_intent_attempts", 0)) + 1
-    call_info_store[call_sid] = st
-    return st["unclear_intent_attempts"]
-
-def reset_unclear_attempts(call_sid: str) -> None:
-    st = get_call_state(call_sid)
-    if st.get("unclear_intent_attempts"):
-        st["unclear_intent_attempts"] = 0
-        call_info_store[call_sid] = st
-
-async def ask_for_specifics(twiml: VoiceResponse, call_sid: str) -> None:
-    logger.info(f"🔍 ASKING FOR SPECIFICS: Requesting more details about plumbing issue for {call_sid}")
-    await add_tts_or_say_to_twiml(
-        twiml,
-        call_sid,
-        "Got it. What exactly do you need? For example: water heater repair, drain unclog, leak detection, toilet issue, or a new install."
-    )
-
-async def proceed_with_intent(call_sid: str, new_intent: dict, twiml: VoiceResponse) -> VoiceResponse:
-    # Reset attempts because we now have a clear path
-    reset_unclear_attempts(call_sid)
-    # Delegate to main handler with the clarified intent
-    return await handle_intent(call_sid, new_intent, None)
-
-async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: VoiceResponse) -> VoiceResponse:
-    # 0) Handle transfer confirmation responses universally (regardless of conversation stage)
-    dialog = call_dialog_state.get(call_sid, {})
-    if dialog.get('step') == 'awaiting_transfer_confirm':
-        if is_affirmative_response(followup_text):
-            # User said yes - transfer to dispatch
-            await add_tts_or_say_to_twiml(twiml, call_sid, "Connecting you to our dispatch team now.")
-            twiml.dial(settings.DISPATCH_NUMBER)
-            # Mark state to avoid further processing
-            st = call_info_store.setdefault(call_sid, {})
-            st["handoff_requested"] = True
-            st["handoff_reason"] = "user_confirmed_transfer_after_unclear_attempts"
-            call_info_store[call_sid] = st
-            # Clear dialog state
-            call_dialog_state.pop(call_sid, None)
-            logger.info(f"📞 User confirmed transfer for {call_sid} after unclear attempts")
-            return twiml
-        elif is_negative_response(followup_text):
-            # User said no - continue with clarification
-            await add_tts_or_say_to_twiml(
-                twiml, 
-                call_sid, 
-                "No problem. Let me try to help you differently. What exactly do you need? For example: water heater repair, drain unclog, leak detection, toilet issue, or a new install."
-            )
-            # Clear dialog state and reset unclear attempts to give them another chance
-            call_dialog_state.pop(call_sid, None)
-            reset_unclear_attempts(call_sid)
-            # Resume streaming to listen for their response
-            start = Start()
-            ws_base = call_info_store.get(call_sid, {}).get('ws_base')
-            if ws_base:
-                wss_url = f"{ws_base}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-            else:
-                if settings.EXTERNAL_WEBHOOK_URL.startswith('https://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('https://', 'wss://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                elif settings.EXTERNAL_WEBHOOK_URL.startswith('http://'):
-                    wss_url = settings.EXTERNAL_WEBHOOK_URL.replace('http://', 'ws://') + settings.STREAM_ENDPOINT + f"?callSid={call_sid}"
-                else:
-                    wss_url = f"wss://{settings.EXTERNAL_WEBHOOK_URL}{settings.STREAM_ENDPOINT}?callSid={call_sid}"
-            start.stream(url=wss_url, track="inbound_track")
-            twiml.append(start)
-            twiml.pause(length=3600)
-            logger.info(f"💬 User declined transfer for {call_sid}, continuing with clarification")
-            return twiml
-        else:
-            # Unclear response to transfer confirmation - ask again more directly
-            await add_tts_or_say_to_twiml(twiml, call_sid, "I didn't catch that. Should I transfer you to a representative? Please say yes or no.")
-            # Keep the same dialog state and resume streaming
-            start = Start()
-            wss_url = _build_wss_url_for_resume(call_sid)
-            start.stream(url=wss_url, track="inbound_track")
-            twiml.append(start)
-            twiml.pause(length=3600)
-            return twiml
-
-    # 1) If user explicitly asks for a human, route immediately.
-    if is_transfer_request(followup_text):
-        try:
-            await add_tts_or_say_to_twiml(twiml, call_sid, "Connecting you to our dispatcher now.")
-        except Exception:
-            pass
-        mark_handoff(call_sid, "user_requested_transfer")
-        await perform_dispatch_transfer(call_sid)
-        return twiml
-
-    # 1.5) Minimal safety/VIP triggers (fast path)
-    force, reason = should_force_transfer(followup_text, get_caller_e164(call_sid))
-    if force:
-        try:
-            await add_tts_or_say_to_twiml(twiml, call_sid, "I'll connect you to our dispatcher right now.")
-        except Exception:
-            pass
-        mark_handoff(call_sid, reason or "trigger_minimal")
-        await perform_dispatch_transfer(call_sid)
-        return twiml
-
-    # Debounce duplicates: don't count repeated unclear within short window
+def _mark_progress(call_sid: str, progress_type: str, details: str = ""):
+    """Mark that meaningful progress has been made in the conversation"""
     try:
-        info = call_info_store.get(call_sid, {})
-        last_norm = (info.get("last_followup_norm") or "").strip()
-        last_ts = float(info.get("last_followup_ts") or 0)
-        now_ts = time.time()
-        norm = " ".join((followup_text or "").lower().strip().split())
-        if last_norm == norm and (now_ts - last_ts) < 30.0:
-            logger.info(f"Debounced duplicate follow-up for {call_sid}: '{followup_text}'")
-            # Re-prompt gently but do not increment attempts
-            await ask_for_specifics(twiml, call_sid)
-            return twiml
-        info["last_followup_norm"] = norm
-        info["last_followup_ts"] = now_ts
-        call_info_store[call_sid] = info
-    except Exception:
-        pass
-
-    # 2) Try to extract intent again.
-    try:
-        from ..flows.intents import extract_plumbing_intent  # type: ignore
-        new_intent = await extract_plumbing_intent(followup_text)
+        cycle_tracking = speech_gate_cycle_tracking.get(call_sid, {})
+        if not cycle_tracking:
+            logger.info(f"🔍 No cycle tracking found for progress marking on {call_sid}")
+            return
+        
+        current_time = time.time()
+        cycle_tracking['last_progress_time'] = current_time
+        cycle_tracking['consecutive_no_progress'] = 0  # Reset counter
+        
+        logger.info(f"✅ PROGRESS MARKED for {call_sid}: {progress_type} - {details}")
+        logger.debug(f"   📊 Progress stats: consecutive_no_progress reset to 0, last_progress_time={current_time}")
+        
     except Exception as e:
-        logger.error(f"Re-extract intent failed for {call_sid}: {e}")
-        new_intent = None
+        logger.error(f"Error marking progress for {call_sid}: {e}")
 
-    unclear = (not new_intent) or has_no_clear_service_intent(new_intent)
-
-    if unclear:
-        attempts = increment_unclear_attempts(call_sid)
-        if attempts >= MAX_UNCLEAR_ATTEMPTS:
-            # On the third attempt, ask for transfer confirmation instead of immediately transferring
-            try:
-                await add_tts_or_say_to_twiml(
-                    twiml,
-                    call_sid,
-                    "Sorry, I'm having trouble understanding your request. Would you like me to transfer you to a representative on our team?"
-                )
-                # Set dialog state to await transfer confirmation
-                call_dialog_state[call_sid] = {'step': 'awaiting_transfer_confirm'}
-                # Resume streaming to listen for yes/no response
-                start = Start()
-                wss_url = _build_wss_url_for_resume(call_sid)
-                start.stream(url=wss_url, track="inbound_track")
-                twiml.append(start)
-                twiml.pause(length=3600)
-            except Exception:
-                pass
-            return twiml
-        else:
-            await ask_for_specifics(twiml, call_sid)
-            return twiml
-
-    # 3) Clear intent — continue normal booking flow
-    return await proceed_with_intent(call_sid, new_intent, twiml)
-
-# Minimal trigger evaluator (VIP/safety/abuse fast-path)
-import json as _json
-import re as _re
-
-TRIGGER_PATH = os.getenv("MINI_TRIGGER_JSON", os.path.join(os.path.dirname(__file__), "min_triggers.json"))
-_transfer_res = None
-_vip_set: set[str] = set()
-
-def _load_min_triggers() -> None:
-    global _transfer_res, _vip_set
+def _mark_no_progress(call_sid: str, reason: str = ""):
+    """Mark that no progress was made in this cycle"""
     try:
-        with open(TRIGGER_PATH, "r") as f:
-            cfg = _json.load(f)
-        _transfer_res = [_re.compile(p, _re.IGNORECASE) for p in cfg.get("transfer_patterns", [])]
-        _vip_set = set(cfg.get("vip_numbers_e164", []))
-        logger.info(f"Loaded minimal triggers from {TRIGGER_PATH} (patterns={len(_transfer_res)}, vip={len(_vip_set)})")
+        cycle_tracking = speech_gate_cycle_tracking.get(call_sid, {})
+        if not cycle_tracking:
+            logger.info(f"🔍 No cycle tracking found for no-progress marking on {call_sid}")
+            return
+        
+        cycle_tracking['consecutive_no_progress'] += 1
+        current_count = cycle_tracking['consecutive_no_progress']
+        
+        logger.info(f"❌ NO PROGRESS for {call_sid}: {reason} - consecutive_no_progress={current_count}")
+        logger.warning(f"🚨 NO PROGRESS DETECTED: {call_sid} has {current_count} consecutive cycles without progress")
+        
     except Exception as e:
-        logger.warning(f"Minimal triggers not loaded from {TRIGGER_PATH}: {e}")
-        _transfer_res = []
-        _vip_set = set()
+        logger.error(f"Error marking no progress for {call_sid}: {e}")
 
-def should_force_transfer(text: str, caller_e164: str | None) -> tuple[bool, str]:
-    global _transfer_res, _vip_set
-    if _transfer_res is None:
-        _load_min_triggers()
-    try:
-        if caller_e164 and caller_e164 in _vip_set:
-            return True, "vip_caller"
-        norm = " ".join(((text or "").lower()).strip().split())
-        for rx in _transfer_res or []:
-            if rx.search(norm):
-                return True, "safety_or_escalation_phrase"
-    except Exception:
-        pass
-    return False, ""
-
-def get_caller_e164(call_sid: str) -> str | None:
-    try:
-        num = (call_info_store.get(call_sid, {}) or {}).get("from")
-        return str(num) if num else None
-    except Exception:
-        return None
-
-# Add new function before the existing suppression logic
-def clean_and_filter_transcription(text: str) -> tuple[str, bool]:
+def get_natural_conversation_starter(text: str, dialog: dict, call_sid: str) -> str:
     """
-    Clean transcription text by removing unwanted patterns and repeated phrases.
-    
-    Returns:
-        tuple: (cleaned_text, should_suppress_entirely)
+    Choose natural conversation starters based on context to make responses less robotic.
+    Returns appropriate phrases like 'Thanks', 'Sounds good', 'OK', etc.
     """
-    if not text:
-        return "", True
-    
-    # Original text for logging
-    original_text = text
-    
-    # Convert to lowercase for pattern matching
     text_lower = text.lower()
+    current_step = dialog.get('step', '')
     
-    # Patterns to completely suppress the entire transcription
-    suppression_patterns = [
-        # FEMA references
-        r'for more information,?\s*visit\s*www\.fema\.gov',
-        r'visit\s*www\.fema\.gov',
-        r'fema\.gov',
-        r'federal emergency management agency',
-        # Common transcription artifacts
-        r'thank you for watching',
-        r'subscribe.*channel',
-        r'like.*comment',
-        r'video.*description',
-        r'pissedconsumer',
-        # Sound/noise words that should be suppressed
-        r'\bbeep\b',
-        r'\bboop\b',
-        r'\bclick\b',
-        r'\bclunk\b',
-        r'\bwhir\b',
-        r'\bwhirr\b',
-        r'\bwhistle\b',
-        r'\bchime\b',
-        r'\bding\b',
-        r'\bdong\b',
-        r'\bbuzz\b',
-        r'\bhum\b',
-        r'\bstatic\b',
-        r'\bnoise\b',
-        r'\bbackground noise\b',
-        r'\bdial tone\b',
-        r'\bhangup signal\b',
-        r'\bhang up signal\b',
-        r'\bdisconnect tone\b',
-        r'\bbusy signal\b',
-        r'\bhold music\b',
-        r'\bhold tone\b',
-        r'\bwaiting tone\b',
-        r'\bconnection sound\b',
-        r'\bphone sound\b',
-        r'\btelephone sound\b',
-        r'\bline noise\b',
-        r'\binterference\b',
-        r'\bdistortion\b',
-        r'\bfeedback\b',
-        r'\becho\b',
-        r'\bdelay\b',
-        r'\blatency\b',
-        r'\bdead air\b',
-        r'\bsilence\b',
-        r'\bquiet\b',
-        r'\bwhite noise\b',
-        r'\bpink noise\b',
-        r'\bbrown noise\b',
-        r'\bambient noise\b',
-        r'\broom tone\b',
-        r'\bair conditioning\b',
-        r'\bventilation\b',
-        r'\bfan noise\b',
-        r'\bengine noise\b',
-        r'\btraffic noise\b',
-        r'\bconstruction noise\b',
-        r'\bconversation noise\b',
-        r'\bcrowd noise\b',
-        r'\bbackground conversation\b',
-        r'\bbackground music\b',
-        r'\bbackground tv\b',
-        r'\bbackground radio\b',
-        r'\bbackground audio\b',
-        r'\bbackground sound\b',
-        r'\bbackground voice\b',
-        r'\bbackground speech\b',
-        r'\bbackground talking\b',
-        r'\bbackground chatter\b',
-        r'\bbackground murmur\b',
-        r'\bbackground hum\b',
-        r'\bbackground drone\b',
-        r'\bbackground rumble\b',
-        r'\bbackground roar\b',
-        r'\bbackground hiss\b',
-        r'\bbackground crackle\b',
-        r'\bbackground pop\b',
-        r'\bbackground snap\b',
-        r'\bbackground crack\b',
-        r'\bbackground thud\b',
-        r'\bbackground thump\b',
-        r'\bbackground bang\b',
-        r'\bbackground crash\b',
-        r'\bbackground slam\b',
-        r'\bbackground knock\b',
-        r'\bbackground tap\b',
-        r'\bbackground tick\b',
-        r'\bbackground tock\b',
-        r'\bbackground tick tock\b',
-        r'\bbackground clock\b',
-        r'\bbackground alarm\b',
-        r'\bbackground ring\b',
-        r'\bbackground ringtone\b',
-        r'\bbackground notification\b',
-        r'\bbackground alert\b',
-        r'\bbackground warning\b',
-        r'\bbackground error\b',
-        r'\bbackground system\b',
-        r'\bbackground computer\b',
-        r'\bbackground device\b',
-        r'\bbackground machine\b',
-        r'\bbackground equipment\b',
-        r'\bbackground appliance\b',
-        r'\bbackground tool\b',
-        r'\bbackground instrument\b',
-        r'\bbackground apparatus\b',
-        r'\bbackground mechanism\b',
-        r'\bbackground contraption\b',
-        r'\bbackground gadget\b',
-        r'\bbackground gizmo\b',
-        r'\bbackground widget\b',
-        r'\bbackground thingamajig\b',
-        r'\bbackground whatchamacallit\b',
-        r'\bbackground doohickey\b',
-        r'\bbackground doodad\b',
-        r'\bbackground thingy\b',
-        r'\bbackground thing\b',
-        r'\bbackground object\b',
-        r'\bbackground item\b',
-        r'\bbackground piece\b',
-        r'\bbackground part\b',
-        r'\bbackground component\b',
-        r'\bbackground element\b',
-        r'\bbackground factor\b',
-        r'\bbackground aspect\b',
-        r'\bbackground feature\b',
-        r'\bbackground characteristic\b',
-        r'\bbackground property\b',
-        r'\bbackground attribute\b',
-        r'\bbackground quality\b',
-        r'\bbackground trait\b',
-        r'\bbackground mark\b',
-        r'\bbackground sign\b',
-        r'\bbackground indicator\b',
-        r'\bbackground signal\b',
-        r'\bbackground cue\b',
-        r'\bbackground hint\b',
-        r'\bbackground clue\b',
-        r'\bbackground evidence\b',
-        r'\bbackground proof\b',
-        r'\bbackground trace\b',
-        r'\bbackground remnant\b',
-        r'\bbackground residue\b',
-        r'\bbackground leftover\b',
-        r'\bbackground remainder\b',
-        r'\bbackground excess\b',
-        r'\bbackground surplus\b',
-        r'\bbackground extra\b',
-        r'\bbackground additional\b',
-        r'\bbackground supplementary\b',
-        r'\bbackground complementary\b',
-        r'\bbackground auxiliary\b',
-        r'\bbackground secondary\b',
-        r'\bbackground tertiary\b',
-        r'\bbackground quaternary\b',
-        r'\bbackground quinary\b',
-        r'\bbackground senary\b',
-        r'\bbackground septenary\b',
-        r'\bbackground octonary\b',
-        r'\bbackground nonary\b',
-        r'\bbackground denary\b',
-        r'\bbackground undenary\b',
-        r'\bbackground duodenary\b',
-        r'\bbackground tredenary\b',
-        r'\bbackground quattuordenary\b',
-        r'\bbackground quindenary\b',
-        r'\bbackground sexdenary\b',
-        r'\bbackground septendenary\b',
-        r'\bbackground octodenary\b',
-        r'\bbackground novemdenary\b',
-        r'\bbackground vigintenary\b',
-        # URLs and domains
-        r'https?://[^\s]+',
-        r'www\.[^\s]+',
-        r'\b[a-z0-9-]+\.[a-z]{2,6}\b',
-    ]
+    # Get conversation context
+    info = call_info_store.get(call_sid, {})
+    segments_count = info.get('segments_count', 0)
     
-    # Check if we should suppress the entire transcription
-    for pattern in suppression_patterns:
-        if re.search(pattern, text_lower):
-            logger.info(f"🚫 Suppressing transcription due to pattern '{pattern}': '{original_text}'")
-            return "", True
+    # Confirmation and booking contexts
+    if any(phrase in text_lower for phrase in ['do you want this time', 'please say yes or no', 'confirm']):
+        return "Alright"
     
-    # Clean text by removing unwanted content but keep the rest
-    cleaned_text = text
+    # Time-related responses
+    if any(phrase in text_lower for phrase in ['i can schedule', 'available', 'earliest', 'time looks busy']):
+        return "OK"
     
-    # Remove specific phrases (case-insensitive)
-    removal_patterns = [
-        r'for more information,?\s*visit\s*www\.fema\.gov',
-        r'visit\s*www\.fema\.gov',
-        r'fema\.gov',
-        r'thank you for watching',
-        r'subscribe to.*channel',
-        r'like and comment',
-        r'check the description',
-        # Sound/noise words to remove but keep the rest of the text
-        r'\bbeep\b',
-        r'\bboop\b',
-        r'\bclick\b',
-        r'\bclunk\b',
-        r'\bwhir\b',
-        r'\bwhirr\b',
-        r'\bwhistle\b',
-        r'\bchime\b',
-        r'\bding\b',
-        r'\bdong\b',
-        r'\bbuzz\b',
-        r'\bhum\b',
-        r'\bstatic\b',
-        r'\bnoise\b',
-        r'\bbackground noise\b',
-        r'\bdial tone\b',
-        r'\bhangup signal\b',
-        r'\bhang up signal\b',
-        r'\bdisconnect tone\b',
-        r'\bbusy signal\b',
-        r'\bhold music\b',
-        r'\bhold tone\b',
-        r'\bwaiting tone\b',
-        r'\bconnection sound\b',
-        r'\bphone sound\b',
-        r'\btelephone sound\b',
-        r'\bline noise\b',
-        r'\binterference\b',
-        r'\bdistortion\b',
-        r'\bfeedback\b',
-        r'\becho\b',
-        r'\bdelay\b',
-        r'\blatency\b',
-        r'\bdead air\b',
-        r'\bsilence\b',
-        r'\bquiet\b',
-        r'\bwhite noise\b',
-        r'\bpink noise\b',
-        r'\bbrown noise\b',
-        r'\bambient noise\b',
-        r'\broom tone\b',
-        r'\bair conditioning\b',
-        r'\bventilation\b',
-        r'\bfan noise\b',
-        r'\bengine noise\b',
-        r'\btraffic noise\b',
-        r'\bconstruction noise\b',
-        r'\bconversation noise\b',
-        r'\bcrowd noise\b',
-        r'\bbackground conversation\b',
-        r'\bbackground music\b',
-        r'\bbackground tv\b',
-        r'\bbackground radio\b',
-        r'\bbackground audio\b',
-        r'\bbackground sound\b',
-        r'\bbackground voice\b',
-        r'\bbackground speech\b',
-        r'\bbackground talking\b',
-        r'\bbackground chatter\b',
-        r'\bbackground murmur\b',
-        r'\bbackground hum\b',
-        r'\bbackground drone\b',
-        r'\bbackground rumble\b',
-        r'\bbackground roar\b',
-        r'\bbackground hiss\b',
-        r'\bbackground crackle\b',
-        r'\bbackground pop\b',
-        r'\bbackground snap\b',
-        r'\bbackground crack\b',
-        r'\bbackground thud\b',
-        r'\bbackground thump\b',
-        r'\bbackground bang\b',
-        r'\bbackground crash\b',
-        r'\bbackground slam\b',
-        r'\bbackground knock\b',
-        r'\bbackground tap\b',
-        r'\bbackground tick\b',
-        r'\bbackground tock\b',
-        r'\bbackground tick tock\b',
-        r'\bbackground clock\b',
-        r'\bbackground alarm\b',
-        r'\bbackground ring\b',
-        r'\bbackground ringtone\b',
-        r'\bbackground notification\b',
-        r'\bbackground alert\b',
-        r'\bbackground warning\b',
-        r'\bbackground error\b',
-        r'\bbackground system\b',
-        r'\bbackground computer\b',
-        r'\bbackground device\b',
-        r'\bbackground machine\b',
-        r'\bbackground equipment\b',
-        r'\bbackground appliance\b',
-        r'\bbackground tool\b',
-        r'\bbackground instrument\b',
-        r'\bbackground apparatus\b',
-        r'\bbackground mechanism\b',
-        r'\bbackground contraption\b',
-        r'\bbackground gadget\b',
-        r'\bbackground gizmo\b',
-        r'\bbackground widget\b',
-        r'\bbackground thingamajig\b',
-        r'\bbackground whatchamacallit\b',
-        r'\bbackground doohickey\b',
-        r'\bbackground doodad\b',
-        r'\bbackground thingy\b',
-        r'\bbackground thing\b',
-        r'\bbackground object\b',
-        r'\bbackground item\b',
-        r'\bbackground piece\b',
-        r'\bbackground part\b',
-        r'\bbackground component\b',
-        r'\bbackground element\b',
-        r'\bbackground factor\b',
-        r'\bbackground aspect\b',
-        r'\bbackground feature\b',
-        r'\bbackground characteristic\b',
-        r'\bbackground property\b',
-        r'\bbackground attribute\b',
-        r'\bbackground quality\b',
-        r'\bbackground trait\b',
-        r'\bbackground mark\b',
-        r'\bbackground sign\b',
-        r'\bbackground indicator\b',
-        r'\bbackground signal\b',
-        r'\bbackground cue\b',
-        r'\bbackground hint\b',
-        r'\bbackground clue\b',
-        r'\bbackground evidence\b',
-        r'\bbackground proof\b',
-        r'\bbackground trace\b',
-        r'\bbackground remnant\b',
-        r'\bbackground residue\b',
-        r'\bbackground leftover\b',
-        r'\bbackground remainder\b',
-        r'\bbackground excess\b',
-        r'\bbackground surplus\b',
-        r'\bbackground extra\b',
-        r'\bbackground additional\b',
-        r'\bbackground supplementary\b',
-        r'\bbackground complementary\b',
-        r'\bbackground auxiliary\b',
-        r'\bbackground secondary\b',
-        r'\bbackground tertiary\b',
-        r'\bbackground quaternary\b',
-        r'\bbackground quinary\b',
-        r'\bbackground senary\b',
-        r'\bbackground septenary\b',
-        r'\bbackground octonary\b',
-        r'\bbackground nonary\b',
-        r'\bbackground denary\b',
-        r'\bbackground undenary\b',
-        r'\bbackground duodenary\b',
-        r'\bbackground tredenary\b',
-        r'\bbackground quattuordenary\b',
-        r'\bbackground quindenary\b',
-        r'\bbackground sexdenary\b',
-        r'\bbackground septendenary\b',
-        r'\bbackground octodenary\b',
-        r'\bbackground novemdenary\b',
-        r'\bbackground vigintenary\b',
-    ]
+    # After user provides information (booking details, preferences, etc.)
+    if current_step in ['awaiting_time_confirm', 'awaiting_location_confirm'] or segments_count > 1:
+        starters = ["Thanks", "Sounds good", "Got it", "Perfect"]
+        # Simple rotation based on call activity to add variety
+        import time
+        starter_index = int(time.time() // 10) % len(starters)  # Changes every 10 seconds
+        return starters[starter_index]
     
-    for pattern in removal_patterns:
-        cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE)
+    # Problem-solving and clarification contexts
+    if any(phrase in text_lower for phrase in ['what exactly', 'could you', 'tell me', 'what can we assist']):
+        return "Alright"
     
-    # Check for excessive repetitions before cleaning
-    if has_excessive_repetitions(cleaned_text):
-        logger.info(f"🚫 Suppressing transcription due to excessive repetitions: '{original_text}'")
-        return "", True
+    # Error recovery and re-prompting
+    if any(phrase in text_lower for phrase in ["didn't catch", "sorry", "trouble understanding"]):
+        return "OK"
     
-    # Remove excessive repeated words/phrases
-    cleaned_text = remove_repeated_phrases(cleaned_text)
+    # Transfer and handoff contexts
+    if any(phrase in text_lower for phrase in ['would you like me to transfer', 'connect you']):
+        return "Alright"
     
-    # Clean up extra whitespace
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+    # Positive acknowledgments
+    if any(phrase in text_lower for phrase in ['great', 'perfect', 'excellent']):
+        return "Sounds good"
     
-    # If cleaning removed too much content, suppress
-    if not cleaned_text or len(cleaned_text.strip()) < 3:
-        logger.info(f"🚫 Suppressing transcription after cleaning (too little content): '{original_text}' -> '{cleaned_text}'")
-        return "", True
+    # Follow-up questions and continued conversation
+    if any(phrase in text_lower for phrase in ['what date', 'which time', 'any other', 'anything else']):
+        return "OK"
     
-    # Log if we cleaned anything
-    if cleaned_text != original_text:
-        logger.info(f"🧹 Cleaned transcription: '{original_text}' -> '{cleaned_text}'")
+    # Default starters for general responses - rotate for variety
+    if segments_count > 0:  # Only after initial exchange
+        default_starters = ["Alright", "OK", "Thanks"]
+        import time
+        starter_index = int(time.time() // 15) % len(default_starters)  # Changes every 15 seconds
+        return default_starters[starter_index]
     
-    return cleaned_text, False
+    # Return empty string for initial responses or when no starter is appropriate
+    return ""
 
-def has_excessive_repetitions(text: str) -> bool:
-    """
-    Check if text has excessive repetitions that indicate noise/artifacts.
-    Allow repetitions only for time-related words and yes/no responses.
+async def add_tts_or_say_to_twiml(target, call_sid: str, text: str):
+    # Get customer name from dialog state and prepend it to most messages
+    dialog = call_dialog_state.get(call_sid, {})
+    customer_name = dialog.get('customer_name')
     
-    Returns:
-        bool: True if text should be suppressed due to excessive repetitions
-    """
-    if not text:
-        return False
+    # Don't add name to certain types of messages
+    skip_name_prefixes = [
+        "hello", "who do i have", "i didn't catch your name", "connecting you", 
+        "thanks for trusting", "thank you for calling", "goodbye", "bye",
+        "nice to meet you"
+    ]
     
-    # Split into words
-    words = text.split()
-    if len(words) <= 2:
-        return False
+    # Check if this message should skip name prefixing
+    should_skip_name = any(text.lower().startswith(prefix) for prefix in skip_name_prefixes)
     
-    # Define allowed repetition words (time-related and yes/no responses)
-    allowed_repetition_words = {
-        # Time-related words
-        'am', 'pm', 'a.m.', 'p.m.', 'morning', 'afternoon', 'evening', 'night',
-        'today', 'tomorrow', 'yesterday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
-        'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
-        'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
-        'o\'clock', 'oclock', 'hour', 'hours', 'minute', 'minutes', 'second', 'seconds',
-        # Yes/no responses
-        'yes', 'no', 'yeah', 'yep', 'yup', 'nope', 'nah', 'ok', 'okay', 'sure', 'right',
-        # Numbers (for time)
-        'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
-        'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
-        'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred',
-        # Time indicators
-        'sharp', 'exactly', 'precisely', 'around', 'about', 'approximately', 'roughly',
-        'early', 'late', 'soon', 'later', 'earlier', 'now', 'then', 'when', 'time'
+    # Prepend name if available and appropriate with natural conversation starters
+    if customer_name and not should_skip_name and dialog.get('step') != 'awaiting_name':
+        # Choose natural conversation starter based on context
+        conversation_starters = get_natural_conversation_starter(text, dialog, call_sid)
+        if conversation_starters:
+            speak_text = f"{conversation_starters}, {customer_name}, {text}".replace("_", " ")
+        else:
+            speak_text = f"{customer_name}, {text}".replace("_", " ")
+    else:
+        speak_text = text.replace("_", " ")
+    
+    preview = speak_text if len(speak_text) <= 200 else speak_text[:200] + "..."
+    
+    # Activate speech gate when bot starts speaking
+    await _activate_speech_gate(call_sid, speak_text)
+    
+    if settings.FORCE_SAY_ONLY:
+        logger.info(f"🗣️ OpenAI TTS SAY for CallSid={call_sid}: {preview}")
+        target.say(speak_text)
+        return
+    audio = await synthesize_tts(speak_text)
+    if audio:
+        tts_audio_store[call_sid] = audio
+        # Bump version so TwiML <Play> URL changes each time (prevents identical-string dedupe)
+        v = int(tts_version_counter.get(call_sid, 0)) + 1
+        tts_version_counter[call_sid] = v
+        audio_url = f"{settings.EXTERNAL_WEBHOOK_URL}/tts/{call_sid}.mp3?v={v}"
+        logger.info(f"🗣️ OpenAI TTS PLAY for CallSid={call_sid}: url={audio_url} bytes={len(audio)} text={preview}")
+        target.play(audio_url)
+    else:
+        logger.info(f"🗣️ OpenAI TTS SAY (fallback) for CallSid={call_sid}: {preview}")
+        target.say(speak_text)
+
+# Push updated TwiML mid-call to Twilio
+async def push_twiml_to_call(call_sid: str, response: VoiceResponse):
+     try:
+         twiml_str = str(response)
+         # Skip if identical to last TwiML pushed
+         prev = last_twiml_store.get(call_sid)
+         now_ts = time.time()
+         if prev == twiml_str:
+             logger.info(f"Skipping TwiML push for {call_sid}: identical to last")
+             return
+         # Throttle frequent pushes
+         last_ts = last_twiml_push_ts.get(call_sid, 0)
+         if now_ts - last_ts < TWIML_PUSH_MIN_INTERVAL_SEC:
+             logger.info(f"Throttling TwiML push for {call_sid}: pushed {now_ts - last_ts:.2f}s ago")
+             return
+         last_twiml_store[call_sid] = twiml_str
+         last_twiml_push_ts[call_sid] = now_ts
+         logger.info(f"🔊 Pushing TwiML to call {call_sid}")
+         logger.debug(f"Updating call {call_sid} with TwiML: {twiml_str}")
+         if twilio_client is None:
+             logger.warning("TwiML push skipped: Twilio client unavailable")
+             return
+         loop = asyncio.get_event_loop()
+         def _update():
+             return twilio_client.calls(call_sid).update(twiml=twiml_str)  # type: ignore[union-attr]
+         result = await loop.run_in_executor(None, _update)
+         logger.info(f"Pushed TwiML update to call {call_sid}; status={getattr(result, 'status', 'unknown')}")
+     except Exception as e:
+         logger.error(f"Failed to push TwiML directly to call {call_sid}: {e}; attempting URL fallback")
+         if twilio_client is None:
+             return
+         try:
+             url = f"{settings.EXTERNAL_WEBHOOK_URL}/twiml/{call_sid}"
+             loop = asyncio.get_event_loop()
+             def _update_url():
+                 return twilio_client.calls(call_sid).update(url=url, method="GET")  # type: ignore[union-attr]
+             result = await loop.run_in_executor(None, _update_url)
+             logger.info(f"Pushed TwiML via URL to call {call_sid}; status={getattr(result, 'status', 'unknown')} url={url}")
+         except Exception as e2:
+             logger.error(f"URL fallback also failed for call {call_sid}: {e2}")
+
+def extract_name_from_text(text: str) -> str:
+    """Extract customer name from text response"""
+    import re
+    
+    # Normalize and clean the text
+    text = text.strip().lower()
+    
+    # Common name introduction patterns
+    name_patterns = [
+        r"(?:my name is|i'm|i am|this is|it's|it is|call me)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",
+        r"^([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+?)(?:\s+here|[.,!?]?\s*$)",  # Simple name at start, with optional punctuation
+        r"(?:i saw|i met|i know)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "I saw Daniel" type patterns
+        r"(?:this is|that's|that is)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "This is Daniel" type patterns
+        r"^(?:um|uh|well|so|like|just)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # Handle filler words before names
+    ]
+    
+    for pattern in name_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            name = match.group(1).strip().title()
+            # Filter out common non-name words
+            skip_words = {
+                'hello', 'hi', 'hey', 'good', 'morning', 'afternoon', 'evening', 
+                'yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'calling', 'about',
+                'speaking', 'here', 'with', 'you', 'the', 'a', 'an', 'and',
+                'saw', 'met', 'know', 'is', 'that',
+                'thank', 'thanks', 'no', 'nope', 'nah',
+                'um', 'uh', 'well', 'so', 'like', 'just'
+            }
+            # Check if any word in the name is in skip words
+            name_words = name.lower().split()
+            if (not any(word in skip_words for word in name_words) and 
+                len(name) >= 2 and len(name) <= 50 and 
+                not any(char.isdigit() for char in name) and
+                all(char.isalpha() or char in ['-', "'", ' '] for char in name)):
+                
+                # For multi-word names, return only the first word
+                if ' ' in name:
+                    first_name = name.split()[0]
+                    # Only return if first name is not a skip word
+                    if first_name.lower() not in skip_words:
+                        return first_name
+                else:
+                    return name
+    
+    # If no name found with regex patterns, try GPT as fallback
+    try:
+        from openai import OpenAI
+        import os
+        
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        prompt = f"""
+        Extract the person's name from this text. Return ONLY the name, nothing else.
+        If no clear name is found, return "None".
+        
+        Examples:
+        "um Sean" -> "Sean"
+        "I'm John" -> "John"
+        "My name is Sarah" -> "Sarah"
+        "Thank you" -> "None"
+        "Hello" -> "None"
+        
+        Text: "{text}"
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=10,
+            temperature=0
+        )
+        
+        name = response.choices[0].message.content.strip()
+        
+        # Validate the response
+        if name.lower() in ['none', 'no', 'n/a', '']:
+            return None
+            
+        # Basic validation - should be letters, hyphens, apostrophes, reasonable length
+        # Allow common punctuation like periods, commas, exclamation marks
+        if (name and len(name) >= 2 and len(name) <= 50 and 
+            all(char.isalpha() or char in ['-', "'", ' '] for char in name) and
+            not any(char.isdigit() for char in text) and
+            not any(char in ['@', '#', '$', '%', '&', '*', '+', '=', '<', '>', '[', ']', '{', '}', '(', ')', '|', '\\', '/', '`', '~', '^'] for char in text)):
+            return name.title()
+            
+    except Exception as e:
+        logger.debug(f"GPT name extraction failed: {e}")
+    
+    return None
+
+def extract_phone_number(text: str) -> str:
+    """Extract phone number from text"""
+    import re
+    # Phone number patterns
+    patterns = [
+        r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',  # 123-456-7890
+        r'\b\(\d{3}\)\s*\d{3}[-.]?\d{4}\b',  # (123) 456-7890
+        r'\b\d{10}\b',  # 1234567890
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group()
+    
+    return None
+
+def extract_address(text: str) -> str:
+    """Extract address from text"""
+    import re
+    # Simple address pattern (number + street)
+    pattern = r'\b\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd)\b'
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        return match.group()
+    
+    return None
+
+def calculate_confidence_scores(args: dict, original_text: str, intent_confidence: float = 0.0) -> dict:
+    """Calculate confidence scores for extracted data including intent confidence"""
+    confidence = {
+        "overall": 0.0,
+        "fields": {},
+        "intent": intent_confidence
     }
     
-    # Check for single word repetitions (3+ consecutive same word)
-    i = 0
-    while i < len(words):
-        word = words[i].lower().strip('.,!?')
-        if not word:  # Skip empty words
-            i += 1
-            continue
-            
-        # Count consecutive repetitions of this word
-        repetitions = 1
-        j = i + 1
-        while j < len(words) and words[j].lower().strip('.,!?') == word:
-            repetitions += 1
-            j += 1
-        
-        # If we have 3+ repetitions of the same word, check if it's allowed
-        if repetitions >= 3:
-            if word in allowed_repetition_words:
-                logger.info(f"✅ Allowed repetition for '{word}' repeated {repetitions} times (time/yes-no word)")
-                # Continue processing - this will be cleaned to single instance later
-            else:
-                logger.info(f"🚫 Excessive word repetition detected: '{word}' repeated {repetitions} times")
-                return True
-        
-        i = j
+    # Job type confidence
+    job_type = args.get('job', {}).get('type')
+    if job_type:
+        confidence["fields"]["type"] = 0.9 if job_type in ['leak', 'water_heater', 'clog', 'gas_line', 'sewer_cam', 'plumbing', 'drain_cleaning', 'plumbing_repair', 'plumbing_installation', 'plumbing_replacement', 'plumbing_maintenance', 'plumbing_inspection', 'plumbing_repair', 'plumbing_installation', 'plumbing_replacement', 'plumbing_maintenance', 'plumbing_inspection'] else 0.7
+    else:
+        confidence["fields"]["type"] = 0.0
     
-    # Check for phrase repetitions (2+ consecutive same phrase)
-    for phrase_length in [2, 3]:
-        if len(words) >= phrase_length * 2:
-            i = 0
-            while i < len(words):
-                if i + phrase_length * 2 <= len(words):
-                    # Get current phrase and next phrase
-                    current_phrase = [w.lower().strip('.,!?') for w in words[i:i+phrase_length]]
-                    next_phrase = [w.lower().strip('.,!?') for w in words[i+phrase_length:i+phrase_length*2]]
-                    
-                    if current_phrase == next_phrase:
-                        # Found repetition, count how many times it repeats
-                        phrase_repetitions = 1
-                        check_pos = i + phrase_length
-                        while check_pos + phrase_length <= len(words):
-                            check_phrase = [w.lower().strip('.,!?') for w in words[check_pos:check_pos+phrase_length]]
-                            if check_phrase == current_phrase:
-                                phrase_repetitions += 1
-                                check_pos += phrase_length
-                            else:
-                                break
-                        
-                        # Check if phrase contains only allowed repetition words
-                        phrase_text = ' '.join(current_phrase)
-                        all_words_allowed = all(w in allowed_repetition_words for w in current_phrase)
-                        
-                        if phrase_repetitions >= 2:
-                            if all_words_allowed:
-                                logger.info(f"✅ Allowed phrase repetition: '{phrase_text}' repeated {phrase_repetitions} times (time/yes-no phrase)")
-                                # Continue processing - this will be cleaned to single instance later
-                            else:
-                                logger.info(f"🚫 Excessive phrase repetition detected: '{phrase_text}' repeated {phrase_repetitions} times")
-                                return True
-                
-                i += 1
+    # Urgency confidence
+    urgency = args.get('job', {}).get('urgency')
+    if urgency:
+        confidence["fields"]["urgency"] = 0.8 if urgency in ['emergency', 'same_day', 'flex', 'as soon as possible', 'urgent', 'immediately', 'today', 'soon', 'quickly', 'right now'] else 0.5
+    else:
+        confidence["fields"]["urgency"] = 0.0
+       
+    # Overall confidence (include intent confidence in calculation)
+    field_scores = list(confidence["fields"].values())
+    field_scores.append(intent_confidence)  # Include intent confidence
+    if field_scores:
+        confidence["overall"] = sum(field_scores) / len(field_scores)
+    
+    if settings.CONFIDENCE_DEBUG_MODE:
+        logger.info(f"🔍 Confidence breakdown: overall={confidence['overall']:.3f}, intent={intent_confidence:.3f}, fields={confidence['fields']}")
+    
+    return confidence
+
+def should_handoff_to_human(args: dict, confidence: dict, call_sid: str = None) -> bool:
+    """Determine if human handoff is needed using configurable thresholds and consecutive failure tracking"""
+    overall_confidence = confidence.get("overall", 0.0)
+    intent_confidence = confidence.get("intent", 0.0)
+    
+    # Initialize handoff reasons for logging
+    handoff_reasons = []
+    
+    # Track consecutive failures if call_sid is provided
+    consecutive_handoff = False
+    single_instance_handoff = False
+    
+    if call_sid:
+        # Track intent confidence failures
+        if intent_confidence < settings.INTENT_CONFIDENCE_THRESHOLD:
+            consecutive_intent_failures[call_sid] += 1
+            if settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"🔢 Intent failure #{consecutive_intent_failures[call_sid]} for {call_sid}")
+        else:
+            # Reset counter on success
+            if consecutive_intent_failures[call_sid] > 0:
+                if settings.CONFIDENCE_DEBUG_MODE:
+                    logger.info(f"✅ Intent confidence recovered for {call_sid}, resetting counter")
+                consecutive_intent_failures[call_sid] = 0
+        
+        # Track overall confidence failures
+        if overall_confidence < settings.OVERALL_CONFIDENCE_THRESHOLD:
+            consecutive_overall_failures[call_sid] += 1
+            if settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"🔢 Overall failure #{consecutive_overall_failures[call_sid]} for {call_sid}")
+        else:
+            # Reset counter on success
+            if consecutive_overall_failures[call_sid] > 0:
+                if settings.CONFIDENCE_DEBUG_MODE:
+                    logger.info(f"✅ Overall confidence recovered for {call_sid}, resetting counter")
+                consecutive_overall_failures[call_sid] = 0
+        
+        # Check consecutive failure thresholds
+        if consecutive_intent_failures[call_sid] >= settings.CONSECUTIVE_INTENT_FAILURES_THRESHOLD:
+            handoff_reasons.append(f"{consecutive_intent_failures[call_sid]} consecutive intent failures >= {settings.CONSECUTIVE_INTENT_FAILURES_THRESHOLD}")
+            consecutive_handoff = True
+        
+        if consecutive_overall_failures[call_sid] >= settings.CONSECUTIVE_OVERALL_FAILURES_THRESHOLD:
+            handoff_reasons.append(f"{consecutive_overall_failures[call_sid]} consecutive overall failures >= {settings.CONSECUTIVE_OVERALL_FAILURES_THRESHOLD}")
+            consecutive_handoff = True
+    
+    # Check for missing critical fields
+    required_fields = ['job.type', 'job.urgency', 'location.raw_address']
+    missing_fields = 0
+    
+    for field in required_fields:
+        field_parts = field.split('.')
+        value = args
+        for part in field_parts:
+            value = value.get(part, {}) if isinstance(value, dict) else None
+            if value is None:
+                break
+        
+        if not value:
+            missing_fields += 1
+    
+    missing_fields_handoff = False
+    if missing_fields >= 2:  # Allow 1 missing field, but not 2+
+        handoff_reasons.append(f"{missing_fields} critical fields missing")
+        missing_fields_handoff = True
+    
+    # Determine final handoff decision
+    should_handoff = single_instance_handoff or consecutive_handoff or missing_fields_handoff
+    
+    # Log handoff decision
+    if should_handoff and settings.CONFIDENCE_DEBUG_MODE:
+        reasons_str = ", ".join(handoff_reasons)
+        logger.info(f"🚨 Handoff triggered for {call_sid or 'unknown'}: {reasons_str}")
+    elif settings.CONFIDENCE_DEBUG_MODE and call_sid:
+        logger.info(f"✅ Continuing automation for {call_sid}: confidence OK")
+    
+    return should_handoff
+
+def create_fallback_response(text: str) -> dict:
+    """Create a fallback response when function calling fails"""
+    return {
+        "intent": "BOOK_JOB",
+        "customer": {"name": None, "phone": None, "email": None},
+        "job": {"type": None, "urgency": None, "description": text},
+        "location": {"raw_address": None, "validated": False, "address_id": None, "lat": None, "lng": None},
+        "constraints": {},
+        "proposed_slot": {},
+        "fsm_backend": None,
+        "confidence": {"overall": 0.0, "fields": {}},
+        "handoff_needed": True
+    }
+
+# Simple negative/closing intent detection
+NEGATIVE_PATTERNS = {
+    "no", "no thanks", "no thank you", "that's all", "that is all", "nothing else", "nope",
+    "nah", "we're good", "we are good", "all good", "goodbye", "bye", "hang up", "end call"
+}
+
+# Goodbye/closing statement patterns
+GOODBYE_PATTERNS = {
+    "thank you for listening", "thank you for watching", "see you next time", "goodbye", "bye",
+    "that's all", "that is all", "we're done", "we are done", "have a good day", "take care",
+    "thanks for your time", "appreciate it", "no thank you", "nothing else", "all set", "we're good"
+}
+
+def is_goodbye_statement(text: str) -> bool:
+    """Detect if user is trying to end the call politely"""
+    norm = " ".join(text.lower().split())
+    
+    # Check for exact matches
+    if norm in GOODBYE_PATTERNS:
+        return True
+    
+    # Check for partial matches
+    goodbye_keywords = [
+        "thank you for listening", "thank you for watching", "see you next time",
+        "have a good day", "take care", "thanks for your time", "appreciate it",
+        "we're done", "we are done", "all set", "we're good", "we are good"
+    ]
+    
+    for pattern in goodbye_keywords:
+        if pattern in norm:
+            return True
     
     return False
 
-def remove_repeated_phrases(text: str) -> str:
-    """
-    Remove excessive repetition of words and short phrases.
-    Examples:
-    - "second, second, second, second" -> "second"
-    - "the the the problem" -> "the problem"
-    - "help me help me help me" -> "help me"
-    """
-    if not text:
-        return text
+def has_no_clear_service_intent(intent: dict) -> bool:
+    """Check if the intent lacks clear plumbing service indicators"""
+    confidence = intent.get('confidence', {})
+    overall_confidence = confidence.get('overall', 0.0)
     
-    # Split into words
-    words = text.split()
-    if len(words) <= 1:
-        return text
+    # Very low confidence indicates unclear intent
+    if overall_confidence < 0.5:
+        return True
     
-    # Remove consecutive repeated words
-    cleaned_words = []
-    i = 0
-    while i < len(words):
-        word = words[i]
-        cleaned_words.append(word)
-        
-        # Count consecutive repetitions of this word
-        repetitions = 1
-        j = i + 1
-        while j < len(words) and words[j].lower().strip('.,!?') == word.lower().strip('.,!?'):
-            repetitions += 1
-            j += 1
-        
-        # If we found repetitions, skip them (keep only the first occurrence)
-        if repetitions > 1:
-            logger.info(f"🔄 Removed {repetitions-1} repetitions of word '{word}'")
-            i = j
-        else:
-            i += 1
+    # Missing critical information
+    job_type = intent.get('job', {}).get('type')
+    job_description = intent.get('job', {}).get('description', '')
     
-    # Join back into text
-    result = ' '.join(cleaned_words)
+    # No specific job type and very generic description
+    if not job_type or job_type == 'None':
+        return True
     
-    # Handle repeated short phrases (2-3 words)
-    # Look for patterns like "help me help me" or "can you can you"
-    for phrase_length in [2, 3]:
-        if len(cleaned_words) >= phrase_length * 2:
-            # Check for repeated phrases
-            new_words = []
-            i = 0
-            while i < len(cleaned_words):
-                if i + phrase_length * 2 <= len(cleaned_words):
-                    # Get current phrase and next phrase
-                    current_phrase = cleaned_words[i:i+phrase_length]
-                    next_phrase = cleaned_words[i+phrase_length:i+phrase_length*2]
-                    
-                    # Normalize for comparison (remove punctuation, lowercase)
-                    current_normalized = [w.lower().strip('.,!?') for w in current_phrase]
-                    next_normalized = [w.lower().strip('.,!?') for w in next_phrase]
-                    
-                    if current_normalized == next_normalized:
-                        # Found repetition, count how many times it repeats
-                        phrase_repetitions = 1
-                        check_pos = i + phrase_length
-                        while check_pos + phrase_length <= len(cleaned_words):
-                            check_phrase = cleaned_words[check_pos:check_pos+phrase_length]
-                            check_normalized = [w.lower().strip('.,!?') for w in check_phrase]
-                            if check_normalized == current_normalized:
-                                phrase_repetitions += 1
-                                check_pos += phrase_length
-                            else:
-                                break
-                        
-                        # Keep only first occurrence
-                        if phrase_repetitions > 1:
-                            logger.info(f"🔄 Removed {phrase_repetitions-1} repetitions of phrase '{' '.join(current_phrase)}'")
-                        new_words.extend(current_phrase)
-                        i = check_pos
-                    else:
-                        new_words.append(cleaned_words[i])
-                        i += 1
-                else:
-                    new_words.append(cleaned_words[i])
-                    i += 1
-            
-            cleaned_words = new_words
-            result = ' '.join(cleaned_words)
-    
-    return result
+    return False
 
-# Now update the existing transcription processing code
+def is_negative_response(text: str) -> bool:
+    norm = " ".join(text.lower().split())
+    if norm in NEGATIVE_PATTERNS:
+        return True
+    # Prefix matches for common closers
+    for p in ("no ", "no,", "no.", "nope", "nah"):
+        if norm.startswith(p):
+            return True
+    return False
+
+# Positive/affirmative detection
+AFFIRMATIVE_PATTERNS = {
+    "yes", "yeah", "yep", "affirmative", "correct", "that works", "sounds good", "please do",
+    "book it", "go ahead", "confirm", "let's do it", "schedule it", "do it", "done", "sure",
+    "okay", "ok", "right", "exactly", "absolutely", "definitely", "uh huh", "mm hmm", "mhm",
+    "for sure", "of course", "you bet", "indeed", "certainly", "sounds right", "looks good",
+    "that sounds right", "that's right", "that is right", "i agree", "agreed"
+}
+
+def is_affirmative_response(text: str) -> bool:
+    norm = " ".join((text or "").lower().strip().strip(".,!?").split())
+    if norm in AFFIRMATIVE_PATTERNS:
+        return True
+    # Check if "yes" appears anywhere in the text (for phrases like "I said yes")
+    if "yes" in norm:
+        return True
+    # Token-based checks
+    words = norm.split()
+    # Short generic confirmations only (avoid long sentences like "yeah, my ...")
+    if len(words) <= 3 and words[0] in {"yes", "yeah", "yep", "yup", "ok", "okay", "sure", "correct", "affirmative", "done", "right", "exactly", "absolutely", "definitely"}:
+        return True
+    # Vocal confirmations that might be transcribed differently
+    vocal_confirms = ["uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet"]
+    if norm in vocal_confirms:
+        return True
+    # Explicit booking/confirmation phrases anywhere in the utterance
+    explicit_patterns = [
+        r"\bbook(\s+it|\s+that)?\b",
+        r"\bconfirm\b",
+        r"\bschedule(\s+it)?\b",
+        r"\bgo ahead\b",
+        r"\bthat works\b",
+        r"\bsounds good\b",
+        r"\blet'?s do it\b",
+        r"\bdo it\b",
+        r"\bplease book\b",
+    ]
+    for pat in explicit_patterns:
+        if re.search(pat, norm):
+            return True
+    return False
+
+# STRICT yes/no confirmation for appointment scheduling
+STRICT_YES_PATTERNS = {
+    "yes", "yeah", "yep", "yup", "affirmative", "correct", "that's right", "that is right",
+    "sure", "okay", "ok", "right", "exactly", "absolutely", "definitely", 
+    "uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet", "indeed", "certainly"
+}
+
+STRICT_NO_PATTERNS = {
+    "no", "nope", "nah", "not that time", "that doesn't work", "that does not work",
+    "uh uh", "nuh uh", "mm mm", "not really", "negative", "that's not right", "that's wrong",
+    "incorrect", "maybe not", "probably not", "i don't think so", "i don't agree"
+}
+
+def is_strict_affirmative_response(text: str) -> bool:
+    """Flexible yes detection for appointment confirmation - accepts any response with affirmative intent"""
+    norm = " ".join((text or "").lower().strip().strip(".,!?").split())
+    
+    # Check for any form of "yes" anywhere in the text
+    if any(word in norm for word in ["yes", "yeah", "yep", "yup"]):
+        return True
+    
+    # Check for positive confirmation words
+    positive_words = ["sure", "okay", "ok", "correct", "right", "absolutely", "definitely", "perfect", "great", "good", "sounds good", "works", "fine"]
+    if any(word in norm for word in positive_words):
+        return True
+    
+    # Check for positive phrases
+    positive_phrases = ["let's do it", "that works", "that sounds good", "i'll take it", "book it", "schedule it", "go ahead", "do it", "sounds great", "looks good", "works for me", "i'm good", "that's good"]
+    if any(phrase in norm for phrase in positive_phrases):
+        return True
+    
+    # Vocal confirmations
+    if any(vocal in norm for vocal in ["uh huh", "mm hmm", "mhm", "for sure", "of course", "you bet"]):
+        return True
+    
+    return False
+
+def is_strict_negative_response(text: str) -> bool:
+    """Flexible no detection for appointment confirmation - accepts any response with negative intent"""
+    norm = " ".join((text or "").lower().strip().strip(".,!?").split())
+    
+    # Check for any form of "no" anywhere in the text
+    if any(word in norm for word in ["no", "nope", "nah"]):
+        return True
+    

@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: Optional[str] = None  # Set a default in env if desired
     ELEVENLABS_MODEL_ID: Optional[str] = None  # e.g. "eleven_multilingual_v2"
     FORCE_SAY_ONLY: bool = False  # Diagnostics: avoid TTS and use <Say>
+    USE_ELEVENLABS_TTS: bool = True  # Control whether to use ElevenLabs (True) or OpenAI TTS (False)
     # OpenAI TTS Configuration
     OPENAI_TTS_SPEED: float = 1.25  # Increased from 1.0 for faster responses (0.25 to 4.0)
     SPEECH_GATE_BUFFER_SEC: float = 1.0  # Buffer time added to TTS duration for speech gate
@@ -87,6 +88,9 @@ class Settings(BaseSettings):
     # Consecutive Failure Thresholds
     CONSECUTIVE_INTENT_FAILURES_THRESHOLD: int = 2  # Number of consecutive intent confidence failures before handoff
     CONSECUTIVE_OVERALL_FAILURES_THRESHOLD: int = 2  # Number of consecutive overall confidence failures before handoff
+    # Missing fields thresholds
+    MISSING_FIELDS_PER_TURN_THRESHOLD: int = 2  # Number of critical fields missing in a single turn to count as a failure
+    CONSECUTIVE_MISSING_FIELDS_FAILURES_THRESHOLD: int = 2  # Consecutive turns with missing fields before handoff
     # Magiclink integration
     MAGICLINK_API_BASE: str = os.getenv("MAGICLINK_API_BASE", "http://localhost:8000")
     MAGICLINK_APP_URL: str = os.getenv("MAGICLINK_APP_URL", "http://localhost:3000/location")
@@ -103,7 +107,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://5c7f9c62c8b9.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = os.getenv("REMOTE_WHISPER_URL", "https://ee7689bd1c73.ngrok-free.app")  # Configurable via .env
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
@@ -169,6 +173,7 @@ tts_version_counter: dict[str, int] = {}
 # Consecutive confidence failure tracking per call
 consecutive_intent_failures: dict[str, int] = defaultdict(int)
 consecutive_overall_failures: dict[str, int] = defaultdict(int)
+consecutive_missing_fields_failures: dict[str, int] = defaultdict(int)
 
 # Live Ops metrics aggregation and websocket clients
 from collections import deque
@@ -1345,6 +1350,7 @@ class ConnectionManager:
             # Clean up consecutive failure tracking
             consecutive_intent_failures.pop(call_sid, None)
             consecutive_overall_failures.pop(call_sid, None)
+            consecutive_missing_fields_failures.pop(call_sid, None)
             # Clean up speech gate state
             if call_sid in vad_states:
                 vad_states[call_sid]['speech_gate_active'] = False
@@ -1506,6 +1512,7 @@ async def media_stream_ws(ws: WebSocket):
             # Clean up consecutive failure tracking
             consecutive_intent_failures.pop(call_sid, None)
             consecutive_overall_failures.pop(call_sid, None)
+            consecutive_missing_fields_failures.pop(call_sid, None)
             await manager.disconnect(call_sid)
 
 #---------------MEDIA PROCESSING---------------
@@ -1951,9 +1958,11 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
                 wav_base64 = base64.b64encode(wav_for_whisper).decode('utf-8')
                 
                 # Send to remote service
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        f"{REMOTE_WHISPER_URL}/transcribe",
+                async with httpx.AsyncClient(timeout=30.0) as whisper_http_client:
+                    # Ensure clean URL without double slashes
+                    whisper_url = REMOTE_WHISPER_URL.rstrip('/')
+                    response = await whisper_http_client.post(
+                        f"{whisper_url}/transcribe",
                         json={
                             "audio_base64": wav_base64,
                             "sample_rate": 16000,
@@ -2134,6 +2143,9 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             dialog['step'] = 'name_collected'
             call_dialog_state[call_sid] = dialog
             
+            # Reset name collection attempts since we succeeded
+            conversation_manager.reset_name_collection_attempts(call_sid)
+            
             twiml = VoiceResponse()
             await add_tts_or_say_to_twiml(
                 twiml, 
@@ -2150,7 +2162,30 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             logger.info(f"👤 Collected name '{customer_name}' for {call_sid}")
             return
         else:
-            # Couldn't extract a clear name, ask again
+            # Couldn't extract a clear name, increment attempts
+            attempts = conversation_manager.increment_name_collection_attempts(call_sid)
+            
+            # Check if we should transfer to human dispatch
+            if conversation_manager.should_handoff_due_to_name_collection_attempts(call_sid):
+                logger.info(f"🤝 HANDOFF: Too many name collection attempts ({attempts}) for {call_sid} - transferring to human dispatch")
+                twiml = VoiceResponse()
+                await add_tts_or_say_to_twiml(
+                    twiml, 
+                    call_sid, 
+                    "I'm having trouble understanding your name clearly. Let me connect you with our dispatch team who can better assist you."
+                )
+                twiml.dial(settings.DISPATCH_NUMBER)
+                # Mark state to avoid further processing
+                st = call_info_store.setdefault(call_sid, {})
+                st["handoff_requested"] = True
+                st["handoff_reason"] = "too_many_name_collection_attempts"
+                call_info_store[call_sid] = st
+                # Clear dialog state
+                call_dialog_state.pop(call_sid, None)
+                await push_twiml_to_call(call_sid, twiml)
+                return
+            
+            # Ask again for the name
             twiml = VoiceResponse()
             await add_tts_or_say_to_twiml(
                 twiml, 
@@ -2435,20 +2470,23 @@ def infer_urgency_from_text(text: str) -> str:
 
 # TTS: synthesize with ElevenLabs or OpenAI 4o TTS
 async def synthesize_tts(text: str) -> Optional[bytes]:
-    # Try ElevenLabs first if configured
-    if settings.ELEVENLABS_API_KEY and settings.ELEVENLABS_VOICE_ID:
+    # Check if ElevenLabs TTS is enabled and configured
+    if (settings.USE_ELEVENLABS_TTS and 
+        settings.ELEVENLABS_API_KEY and 
+        settings.ELEVENLABS_VOICE_ID):
         try:
             from elevenlabs import ElevenLabs
             
             # Create ElevenLabs client with API key
-            client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
+            elevenlabs_client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
             
             # Use configured voice ID or default to the specified one
             voice_id = settings.ELEVENLABS_VOICE_ID
             model_id = settings.ELEVENLABS_MODEL_ID or "eleven_multilingual_v2"
             
             # Generate audio using ElevenLabs
-            audio_stream = client.text_to_speech.convert(
+            logger.info(f"🎤 Using ElevenLabs TTS (voice: {voice_id}, model: {model_id})")
+            audio_stream = elevenlabs_client.text_to_speech.convert(
                 voice_id=voice_id,
                 text=text,
                 model_id=model_id
@@ -2467,11 +2505,17 @@ async def synthesize_tts(text: str) -> Optional[bytes]:
             logger.error(f"ElevenLabs TTS failed: {e}")
             logger.info("Falling back to OpenAI TTS...")
     
-    # Fallback to OpenAI TTS
+    # If ElevenLabs is disabled or not configured, use OpenAI TTS
+    if not settings.USE_ELEVENLABS_TTS:
+        logger.info("🎤 ElevenLabs TTS disabled via USE_ELEVENLABS_TTS=False, using OpenAI TTS")
+    
+    # Use OpenAI TTS (either as fallback or primary choice)
     try:
         voice = getattr(settings, 'OPENAI_TTS_VOICE', 'alloy')  # Default to 'alloy' voice
         model = getattr(settings, 'OPENAI_TTS_MODEL', 'tts-1')  # Default to 'tts-1' model
         speed = settings.OPENAI_TTS_SPEED  # Use configured speed (0.25 to 4.0)
+        
+        logger.info(f"🎤 Using OpenAI TTS (voice: {voice}, model: {model}, speed: {speed})")
         
         response = client.audio.speech.create(
             model=model,
@@ -2703,7 +2747,7 @@ def extract_name_from_text(text: str) -> str:
     # Common name introduction patterns
     name_patterns = [
         r"(?:my name is|i'm|i am|this is|it's|it is|call me)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",
-        r"^([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+?)(?:\s+here|$)",  # Simple name at start
+        r"^([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+?)(?:\s+here|[.,!?]?\s*$)",  # Simple name at start, with optional punctuation
         r"(?:i saw|i met|i know)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "I saw Daniel" type patterns
         r"(?:this is|that's|that is)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "This is Daniel" type patterns
         r"^(?:um|uh|well|so|like|just)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # Handle filler words before names
@@ -2718,8 +2762,9 @@ def extract_name_from_text(text: str) -> str:
                 'hello', 'hi', 'hey', 'good', 'morning', 'afternoon', 'evening', 
                 'yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'calling', 'about',
                 'speaking', 'here', 'with', 'you', 'the', 'a', 'an', 'and',
-                'um', 'uh', 'well', 'so', 'like', 'just', 'saw', 'met', 'know', 'is', 'that',
-                'thank', 'thanks', 'no', 'nope', 'nah'
+                'saw', 'met', 'know', 'is', 'that',
+                'thank', 'thanks', 'no', 'nope', 'nah',
+                'um', 'uh', 'well', 'so', 'like', 'just'
             }
             # Check if any word in the name is in skip words
             name_words = name.lower().split()
@@ -2853,19 +2898,10 @@ def should_handoff_to_human(args: dict, confidence: dict, call_sid: str = None) 
     # Initialize handoff reasons for logging
     handoff_reasons = []
     
-    # Check single-instance thresholds first
-    single_instance_handoff = False
-    
-    if overall_confidence < settings.OVERALL_CONFIDENCE_THRESHOLD:
-        handoff_reasons.append(f"overall confidence {overall_confidence:.3f} < {settings.OVERALL_CONFIDENCE_THRESHOLD}")
-        single_instance_handoff = True
-    
-    if intent_confidence < settings.INTENT_CONFIDENCE_THRESHOLD:
-        handoff_reasons.append(f"intent confidence {intent_confidence:.3f} < {settings.INTENT_CONFIDENCE_THRESHOLD}")
-        single_instance_handoff = True
-    
     # Track consecutive failures if call_sid is provided
     consecutive_handoff = False
+    single_instance_handoff = False
+    
     if call_sid:
         # Track intent confidence failures
         if intent_confidence < settings.INTENT_CONFIDENCE_THRESHOLD:
@@ -2916,9 +2952,26 @@ def should_handoff_to_human(args: dict, confidence: dict, call_sid: str = None) 
             missing_fields += 1
     
     missing_fields_handoff = False
-    if missing_fields >= 2:  # Allow 1 missing field, but not 2+
-        handoff_reasons.append(f"{missing_fields} critical fields missing")
-        missing_fields_handoff = True
+    # Track consecutive missing field failures per call
+    if call_sid:
+        if missing_fields >= settings.MISSING_FIELDS_PER_TURN_THRESHOLD:
+            consecutive_missing_fields_failures[call_sid] += 1
+            if settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"🔢 Missing fields failure #{consecutive_missing_fields_failures[call_sid]} for {call_sid} ({missing_fields} missing >= {settings.MISSING_FIELDS_PER_TURN_THRESHOLD})")
+        else:
+            if consecutive_missing_fields_failures[call_sid] > 0:
+                if settings.CONFIDENCE_DEBUG_MODE:
+                    logger.info(f"✅ Required fields present for {call_sid}, resetting missing fields counter")
+                consecutive_missing_fields_failures[call_sid] = 0
+        
+        if consecutive_missing_fields_failures[call_sid] >= settings.CONSECUTIVE_MISSING_FIELDS_FAILURES_THRESHOLD:
+            handoff_reasons.append(f"{consecutive_missing_fields_failures[call_sid]} consecutive turns with >= {settings.MISSING_FIELDS_PER_TURN_THRESHOLD} critical fields missing")
+            missing_fields_handoff = True
+    else:
+        # Fallback: if no call_sid tracking, use single-turn decision
+        if missing_fields >= settings.MISSING_FIELDS_PER_TURN_THRESHOLD:
+            handoff_reasons.append(f"{missing_fields} critical fields missing (no call tracking)")
+            missing_fields_handoff = True
     
     # Determine final handoff decision
     should_handoff = single_instance_handoff or consecutive_handoff or missing_fields_handoff
@@ -3402,6 +3455,28 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
     
     notes = intent.get('job', {}).get('description', '')
     
+    # If earlier stages determined a handoff is needed, transfer immediately
+    if intent.get('handoff_needed'):
+        try:
+            await add_tts_or_say_to_twiml(
+                twiml,
+                call_sid,
+                "I'm having trouble confidently handling this automatically. I'll connect you with our dispatcher now."
+            )
+        except Exception:
+            pass
+        # Dial dispatcher and return TwiML so caller pushes it
+        number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+        twiml.dial(number)
+        st = call_info_store.setdefault(call_sid, {})
+        st["handoff_requested"] = True
+        st["handoff_reason"] = "confidence_or_missing_fields"
+        call_info_store[call_sid] = st
+        # Clear dialog state to avoid further automation
+        call_dialog_state.pop(call_sid, None)
+        logger.info(f"🤝 Immediate transfer for {call_sid} due to handoff_needed=True (dispatcher {number})")
+        return twiml
+    
     # Add call context to notes
     if call_info.get('caller_name'):
         notes += f" [Caller: {call_info['caller_name']}]"
@@ -3459,6 +3534,28 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
             else:
                 call_dialog_state[call_sid] = state
+            # Per-step attempts and escalation
+            effective_state = call_dialog_state.get(call_sid, {})
+            current_step = effective_state.get('step', 'unknown')
+            step_attempts = conversation_manager.increment_step_attempts(call_sid, current_step)
+            if conversation_manager.should_handoff_due_to_step_attempts(call_sid, current_step):
+                logger.info(f"🤝 HANDOFF: Too many attempts ({step_attempts}) at step '{current_step}' for {call_sid} - transferring to human dispatch")
+                try:
+                    await add_tts_or_say_to_twiml(
+                        twiml,
+                        call_sid,
+                        "I'm having trouble understanding. Let me connect you with our dispatch team who can better assist you."
+                    )
+                except Exception:
+                    pass
+                number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+                twiml.dial(number)
+                st = call_info_store.setdefault(call_sid, {})
+                st["handoff_requested"] = True
+                st["handoff_reason"] = f"too_many_attempts_{current_step}"
+                call_info_store[call_sid] = st
+                call_dialog_state.pop(call_sid, None)
+                return twiml
             append_stream_and_pause(twiml)
             return twiml
         
@@ -3666,51 +3763,27 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         # Confirmation step: user can confirm or change the suggested slot - STRICT YES/NO ONLY
         if state.get('step') == 'awaiting_time_confirm':
             if is_strict_affirmative_response(followup_text):
-                # Reset clarification attempts on successful confirmation
-                conversation_manager.reset_clarification_attempts(call_sid)
-                # User said YES - proceed to operator
-                suggested_time = state.get('suggested_time')
-                if isinstance(suggested_time, datetime):
-                    try:
-                        await _send_booking_to_operator(call_sid, intent, suggested_time)
-                    except Exception as e:
-                        logger.debug(f"Failed to broadcast booking to operator: {e}")
-                    await add_tts_or_say_to_twiml(twiml, call_sid, "Perfect! You'll be sent an SMS with your booking details once your appointment is confirmed. Thanks for choosing SafeHarbour, have a great rest of your day.")
-                    twiml.hangup()
-                    state['step'] = 'awaiting_operator_confirm'
-                    call_dialog_state[call_sid] = state
-                    return twiml
+                conversation_manager.reset_step_attempts(call_sid, 'awaiting_time_confirm')
+                # continue success path
             elif is_strict_negative_response(followup_text):
-                # Reset clarification attempts on clear negative response
-                conversation_manager.reset_clarification_attempts(call_sid)
-                # User said NO - go back to scheduling
-                await add_tts_or_say_to_twiml(twiml, call_sid, "No problem. Tell me what date and time would work better for you, or say 'earliest' for the next available slot.")
-                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
-                append_stream_and_pause(twiml)
-                return twiml
+                conversation_manager.reset_step_attempts(call_sid, 'awaiting_time_confirm')
+                # continue negative path
             else:
-                # Ambiguous response - check clarification attempts before asking again
-                clarification_count = conversation_manager.increment_clarification_attempts(call_sid)
-                logger.info(f"❓ AMBIGUOUS RESPONSE: User response '{followup_text}' for {call_sid} was not clearly yes or no - clarification attempt #{clarification_count}")
-                
-                # If we've asked for clarification too many times, transfer to human dispatch
-                if conversation_manager.should_handoff_due_to_clarification_attempts(call_sid):
-                    logger.info(f"🤝 HANDOFF: Too many clarification attempts ({clarification_count}) for {call_sid} - transferring to human dispatch")
-                    await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble understanding your response. Let me connect you with our dispatch team who can help you schedule your appointment.")
-                    # Reset attempts and transition to operator handoff
-                    conversation_manager.reset_clarification_attempts(call_sid)
-                    state['step'] = 'awaiting_operator_confirm'
-                    call_dialog_state[call_sid] = state
-                    append_stream_and_pause(twiml)
+                step_attempts = conversation_manager.increment_step_attempts(call_sid, 'awaiting_time_confirm')
+                if conversation_manager.should_handoff_due_to_step_attempts(call_sid, 'awaiting_time_confirm'):
+                    try:
+                        await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble understanding your response. Let me connect you with our dispatch team who can help you schedule your appointment.")
+                    except Exception:
+                        pass
+                    number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+                    twiml.dial(number)
+                    st = call_info_store.setdefault(call_sid, {})
+                    st["handoff_requested"] = True
+                    st["handoff_reason"] = "too_many_attempts_awaiting_time_confirm"
+                    call_info_store[call_sid] = st
+                    call_dialog_state.pop(call_sid, None)
                     return twiml
-                
-                # Ask for clarification with clear instructions
-                suggested_time = state.get('suggested_time')
-                if isinstance(suggested_time, datetime):
-                    await add_tts_or_say_to_twiml(twiml, call_sid, f"I need a clear answer. Do you want the appointment at {_format_slot(suggested_time)}? Please say exactly YES if you want it, or NO if you don't.")
-                    # Keep the same state - they stay in confirmation mode
-                    append_stream_and_pause(twiml)
-                    return twiml
+                # continue existing clarification flow
             # If user provided a new date/time at confirmation step, re-parse and re-suggest
             newly_parsed = parse_human_datetime(followup_text)
             if newly_parsed:
@@ -3777,10 +3850,10 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 logger.info(f"Handled path choice (emergency) for CallSid={call_sid}")
                 return twiml
             elif any(k in text_norm for k in ['schedule', 'book', 'technician', 'come check', 'come out', 'appointment']):
-                await add_tts_or_say_to_twiml(twiml, call_sid, f"Great. If you have a date and time in mind, tell me now, otherwise I can suggest the earliest available.")
+                await add_tts_or_say_to_twiml(twiml, call_sid, f"Great. Tell me your preferred time, or say 'earliest'.")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+                conversation_manager.reset_step_attempts(call_sid, 'awaiting_path_choice')
                 append_stream_and_pause(twiml)
-                logger.info(f"Handled path choice (schedule) for CallSid={call_sid}")
                 return twiml
         # If user gives a date/time directly, recognize but don't book yet
         try:
@@ -3820,8 +3893,22 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         # Prompt again if nothing parsed
         await add_tts_or_say_to_twiml(twiml, call_sid, "Please say a date and time, like 'Friday at 3 PM', or say 'earliest'.")
         call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+        step_attempts = conversation_manager.increment_step_attempts(call_sid, 'awaiting_time')
+        if conversation_manager.should_handoff_due_to_step_attempts(call_sid, 'awaiting_time'):
+            logger.info(f"🤝 HANDOFF: Too many attempts ({step_attempts}) at step 'awaiting_time' for {call_sid} - transferring to human dispatch")
+            try:
+                await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble scheduling via voice. Let me connect you with our dispatcher who can help schedule your appointment.")
+            except Exception:
+                pass
+            number = getattr(settings, "DISPATCH_NUMBER", "+14693096560")
+            twiml.dial(number)
+            st = call_info_store.setdefault(call_sid, {})
+            st["handoff_requested"] = True
+            st["handoff_reason"] = "too_many_attempts_awaiting_time"
+            call_info_store[call_sid] = st
+            call_dialog_state.pop(call_sid, None)
+            return twiml
         append_stream_and_pause(twiml)
-        logger.info(f"Handled followup prompting for CallSid={call_sid}")
         return twiml
 
     # Initial intent handling (no <Gather>; we keep streaming and listen continuously)
@@ -4081,6 +4168,7 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
             return twiml
         elif is_negative_response(followup_text):
             # User said no - continue with clarification
+            twiml = VoiceResponse()
             await add_tts_or_say_to_twiml(
                 twiml, 
                 call_sid, 
@@ -4108,6 +4196,7 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
             return twiml
         else:
             # Unclear response to transfer confirmation - ask again more directly
+            twiml = VoiceResponse()
             await add_tts_or_say_to_twiml(twiml, call_sid, "I didn't catch that. Should I transfer you to a representative? Please say yes or no.")
             # Keep the same dialog state and resume streaming
             start = Start()

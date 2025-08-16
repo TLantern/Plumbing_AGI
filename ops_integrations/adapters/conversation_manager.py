@@ -22,14 +22,22 @@ class ConversationManager:
         # Clarification attempts tracking
         self.clarification_attempts: Dict[str, int] = defaultdict(int)
         
+        # Name collection attempts tracking
+        self.name_collection_attempts: Dict[str, int] = defaultdict(int)
+        
+        # Per-step attempts tracking (e.g., awaiting_time, awaiting_path_choice, awaiting_location_confirm)
+        self.step_attempts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        
         # Repeated utterances tracking
         self.repeated_utterances: Dict[str, Dict[str, int]] = defaultdict(dict)
         
         # Configuration
         self.duplicate_window_seconds = 30
         self.max_clarification_attempts = 2
+        self.max_name_collection_attempts = 3
+        self.max_step_attempts = 3
         self.max_repeated_utterances = 3
-    
+
     def get_dialog_state(self, call_sid: str) -> Dict[str, Any]:
         """Get current dialog state for a call"""
         return self.dialog_states.get(call_sid, {}).copy()
@@ -135,6 +143,50 @@ class ConversationManager:
         """Check if handoff is needed due to too many clarification attempts"""
         return self.get_clarification_attempts(call_sid) >= self.max_clarification_attempts
     
+    def increment_name_collection_attempts(self, call_sid: str) -> int:
+        """Increment name collection attempts and return current count"""
+        self.name_collection_attempts[call_sid] += 1
+        count = self.name_collection_attempts[call_sid]
+        logger.info(f"🔢 Name collection attempt #{count} for {call_sid}")
+        return count
+    
+    def get_name_collection_attempts(self, call_sid: str) -> int:
+        """Get current name collection attempts count"""
+        return self.name_collection_attempts.get(call_sid, 0)
+    
+    def should_handoff_due_to_name_collection_attempts(self, call_sid: str) -> bool:
+        """Check if handoff is needed due to too many name collection attempts"""
+        return self.get_name_collection_attempts(call_sid) >= self.max_name_collection_attempts
+    
+    def reset_name_collection_attempts(self, call_sid: str) -> None:
+        """Reset name collection attempts counter"""
+        if self.name_collection_attempts.get(call_sid, 0) > 0:
+            self.name_collection_attempts[call_sid] = 0
+            logger.info(f"✅ Reset name collection attempts for {call_sid}")
+    
+    # New: generalized per-step attempts APIs
+    def increment_step_attempts(self, call_sid: str, step: str) -> int:
+        self.step_attempts[call_sid][step] += 1
+        count = self.step_attempts[call_sid][step]
+        logger.info(f"🔢 Step attempt #{count} for {call_sid} at step '{step}'")
+        return count
+    
+    def get_step_attempts(self, call_sid: str, step: str) -> int:
+        return self.step_attempts.get(call_sid, {}).get(step, 0)
+    
+    def should_handoff_due_to_step_attempts(self, call_sid: str, step: str) -> bool:
+        return self.get_step_attempts(call_sid, step) >= self.max_step_attempts
+    
+    def reset_step_attempts(self, call_sid: str, step: str) -> None:
+        if self.step_attempts.get(call_sid, {}).get(step, 0) > 0:
+            self.step_attempts[call_sid][step] = 0
+            logger.info(f"✅ Reset step attempts for {call_sid} at step '{step}'")
+    
+    def reset_all_step_attempts(self, call_sid: str) -> None:
+        if self.step_attempts.get(call_sid):
+            self.step_attempts[call_sid] = defaultdict(int)
+            logger.info(f"✅ Reset all step attempts for {call_sid}")
+    
     def reset_clarification_attempts(self, call_sid: str) -> None:
         """Reset clarification attempts counter"""
         if self.clarification_attempts.get(call_sid, 0) > 0:
@@ -150,6 +202,8 @@ class ConversationManager:
     def reset_all_counters(self, call_sid: str) -> None:
         """Reset all counters for a call"""
         self.reset_clarification_attempts(call_sid)
+        self.reset_name_collection_attempts(call_sid)
+        self.reset_all_step_attempts(call_sid)
         self.reset_repeated_utterances(call_sid)
         self.duplicate_tracking.pop(call_sid, None)
     
@@ -163,6 +217,8 @@ class ConversationManager:
             'dialog_step': dialog_state.get('step'),
             'customer_name': dialog_state.get('customer_name'),
             'clarification_attempts': self.get_clarification_attempts(call_sid),
+            'name_collection_attempts': self.get_name_collection_attempts(call_sid),
+            'step_attempts': dict(self.step_attempts.get(call_sid, {})),
             'repeated_utterances': dict(self.repeated_utterances.get(call_sid, {})),
             'call_duration': time.time() - call_info.get('start_ts', time.time()),
             'from_number': call_info.get('from'),
@@ -175,6 +231,8 @@ class ConversationManager:
         self.call_info_store.pop(call_sid, None)
         self.duplicate_tracking.pop(call_sid, None)
         self.clarification_attempts.pop(call_sid, None)
+        self.name_collection_attempts.pop(call_sid, None)
+        self.step_attempts.pop(call_sid, None)
         self.repeated_utterances.pop(call_sid, None)
         logger.info(f"🧹 Cleaned up all data for {call_sid}")
     
