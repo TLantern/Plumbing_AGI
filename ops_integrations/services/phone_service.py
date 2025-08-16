@@ -3219,9 +3219,25 @@ def should_handoff_to_human(args: dict, confidence: dict, call_sid: str = None) 
             missing_fields += 1
     
     missing_fields_handoff = False
-    if missing_fields >= 2:  # Allow 1 missing field, but not 2+
-        handoff_reasons.append(f"{missing_fields} critical fields missing")
-        missing_fields_handoff = True
+    # Track consecutive missing field failures per call
+    if call_sid:
+        if missing_fields >= settings.MISSING_FIELDS_PER_TURN_THRESHOLD:
+            consecutive_missing_fields_failures[call_sid] += 1
+            if settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"🔢 Missing fields failure #{consecutive_missing_fields_failures[call_sid]} for {call_sid} ({missing_fields} missing >= {settings.MISSING_FIELDS_PER_TURN_THRESHOLD})")
+            # Only trigger handoff once we've reached the consecutive threshold
+            if consecutive_missing_fields_failures[call_sid] >= settings.CONSECUTIVE_MISSING_FIELDS_FAILURES_THRESHOLD:
+                handoff_reasons.append(f"{consecutive_missing_fields_failures[call_sid]} consecutive turns with >= {settings.MISSING_FIELDS_PER_TURN_THRESHOLD} critical fields missing")
+                missing_fields_handoff = True
+        else:
+            if consecutive_missing_fields_failures[call_sid] > 0 and settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"✅ Required fields present for {call_sid}, resetting missing fields counter")
+            consecutive_missing_fields_failures[call_sid] = 0
+    else:
+        # Fallback: if no call_sid tracking, use single-turn decision
+        if missing_fields >= settings.MISSING_FIELDS_PER_TURN_THRESHOLD:
+            handoff_reasons.append(f"{missing_fields} critical fields missing (no call tracking)")
+            missing_fields_handoff = True
     
     # Determine final handoff decision
     should_handoff = single_instance_handoff or consecutive_handoff or missing_fields_handoff
@@ -4293,59 +4309,6 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         _mark_no_progress(call_sid, "failed to extract meaningful intent")
     
     # Check if this is a plumbing issue and we haven't asked for problem details yet
-    info = call_info_store.get(call_sid, {})
-    segments_count = int(info.get('segments_count', 0)) + 1
-    info['segments_count'] = segments_count
-    call_info_store[call_sid] = info
-    
-    dialog = call_dialog_state.get(call_sid, {})
-    
-    # Accumulate audio for the entire call and save to step1 directory
-    try:
-        import os
-        import time
-        from datetime import datetime
-        
-        # Create step1 directory if it doesn't exist
-        step1_dir = "step1"
-        os.makedirs(step1_dir, exist_ok=True)
-        
-        # Get or create the accumulated audio buffer for this call
-        if 'accumulated_audio' not in call_info_store.get(call_sid, {}):
-            call_info_store[call_sid] = call_info_store.get(call_sid, {})
-            call_info_store[call_sid]['accumulated_audio'] = bytearray()
-        
-        # Get the most recent audio data for this call
-        vad_state = vad_states.get(call_sid, {})
-        if vad_state.get('pending_audio'):
-            audio_data = bytes(vad_state['pending_audio'])
-        else:
-            # Fallback: try to get from audio buffers
-            audio_data = bytes(audio_buffers.get(call_sid, bytearray()))
-        
-        if audio_data:
-            # Add this audio segment to the accumulated buffer
-            call_info_store[call_sid]['accumulated_audio'].extend(audio_data)
-            
-            # Save the accumulated audio to file
-            accumulated_audio = bytes(call_info_store[call_sid]['accumulated_audio'])
-            filename = f"{step1_dir}/step1_{call_sid}.wav"
-            
-            # Convert to WAV and save
-            sample_rate = audio_config_store.get(call_sid, {}).get('sample_rate', SAMPLE_RATE_DEFAULT)
-            wav_bytes = pcm_to_wav_bytes(accumulated_audio, sample_rate)
-            
-            with open(filename, 'wb') as f:
-                f.write(wav_bytes)
-            
-            logger.info(f"💾 Updated step1 audio for {call_sid} to {filename} (total: {len(accumulated_audio)} bytes)")
-        else:
-            logger.warning(f"⚠️ No audio data available to accumulate for {call_sid}")
-            
-    except Exception as e:
-        logger.error(f"Failed to save step1 audio for {call_sid}: {e}")
-    
-    # Check if this is a plumbing issue and we haven't asked for problem details yet
     job_type = intent.get('job', {}).get('type', '')
     is_plumbing_issue = job_type and job_type != 'general_inquiry'
     
@@ -4391,56 +4354,6 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
     twiml = await handle_intent(call_sid, intent)
     await push_twiml_to_call(call_sid, twiml)
     _mark_progress(call_sid, "intent_handled", f"processed intent: {intent.get('job', {}).get('type', 'unknown')}")
-
-async def extract_intent_from_text(call_sid: str, text:str) -> dict:
-   # Enhanced prompt with better context and examples
-   enhanced_prompt = f"""
-You are a plumbing service booking assistant. Extract structured information from customer requests.
-
-CUSTOMER REQUEST: "{text}"
-
-INSTRUCTIONS:
-1. Identify the specific plumbing job type from the comprehensive list of services
-2. Determine urgency: emergency (immediate), same_day (today), flex (anytime)
-3. Extract customer name and contact info
-4. Parse address information
-5. Assess confidence and handoff needs
-
-EXAMPLES:
-- "kitchen sink is clogged" → job_type: clogged_kitchen_sink
-- "bathroom sink won't drain" → job_type: clogged_bathroom_sink
-- "toilet is running constantly" → job_type: running_toilet
-- "water heater burst" → job_type: water_heater_repair, urgency: emergency
-- "need new faucet installed" → job_type: faucet_replacement
-- "sewer camera inspection" → job_type: camera_inspection
-- "drain smells bad" → job_type: camera_inspection
-- "can come tomorrow" → urgency: flex
-- "need today" → urgency: same_day
-- "emergency leak" → urgency: emergency
-
-Be precise and extract all available information. Match to the most specific service type available.
-"""
-
-   # Send user text to ChatCompletion with function calling
-   resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": enhanced_prompt}],
-        tools=FUNCTIONS,
-        tool_choice="auto",
-        temperature=0.1,  # Lower temperature for more consistent results
-        max_tokens=1000
-   )
-   msg = resp.choices[0].message
-   if msg.tool_calls:
-    tool_call = msg.tool_calls[0]
-    args = json.loads(tool_call.function.arguments)
-    
-    # Post-process and validate the extracted data
-    validated_args = validate_and_enhance_extraction(args, text, call_sid)
-    return validated_args
-
-   # Fallback: no function call, return freeform description
-   return create_fallback_response(text)
 
 def validate_and_enhance_extraction(args: dict, original_text: str, call_sid: str = None) -> dict:
     """Validate and enhance extracted data with additional processing"""
@@ -5190,9 +5103,24 @@ def should_handoff_to_human(args: dict, confidence: dict, call_sid: str = None) 
             missing_fields += 1
     
     missing_fields_handoff = False
-    if missing_fields >= 2:  # Allow 1 missing field, but not 2+
-        handoff_reasons.append(f"{missing_fields} critical fields missing")
-        missing_fields_handoff = True
+    if call_sid:
+        if missing_fields >= settings.MISSING_FIELDS_PER_TURN_THRESHOLD:
+            consecutive_missing_fields_failures[call_sid] += 1
+            if settings.CONFIDENCE_DEBUG_MODE:
+                logger.info(f"🔢 Missing fields failure #{consecutive_missing_fields_failures[call_sid]} for {call_sid} ({missing_fields} missing >= {settings.MISSING_FIELDS_PER_TURN_THRESHOLD})")
+        else:
+            if consecutive_missing_fields_failures[call_sid] > 0:
+                if settings.CONFIDENCE_DEBUG_MODE:
+                    logger.info(f"✅ Required fields present for {call_sid}, resetting missing fields counter")
+                consecutive_missing_fields_failures[call_sid] = 0
+        
+        if consecutive_missing_fields_failures[call_sid] >= settings.CONSECUTIVE_MISSING_FIELDS_FAILURES_THRESHOLD:
+            handoff_reasons.append(f"{consecutive_missing_fields_failures[call_sid]} consecutive turns with >= {settings.MISSING_FIELDS_PER_TURN_THRESHOLD} critical fields missing")
+            missing_fields_handoff = True
+    else:
+        if missing_fields >= settings.MISSING_FIELDS_PER_TURN_THRESHOLD:
+            handoff_reasons.append(f"{missing_fields} critical fields missing (no call tracking)")
+            missing_fields_handoff = True
     
     # Determine final handoff decision
     should_handoff = single_instance_handoff or consecutive_handoff or missing_fields_handoff
