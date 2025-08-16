@@ -9,7 +9,7 @@ import json
 import os
 
 # Configuration
-REMOTE_WHISPER_URL = "https://cd1864cc8a91.ngrok-free.app"
+REMOTE_WHISPER_URL = "https://de9b49ba94c2.ngrok-free.app"
 BEEP_AUDIO_PATH = "adapters/static/beep.wav"
 
 async def test_transcription_with_beep():

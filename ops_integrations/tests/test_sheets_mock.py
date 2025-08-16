@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime
 
-from ops_integrations.adapters.sheets import GoogleSheetsCRM
+from ops_integrations.adapters.external_services.sheets import GoogleSheetsCRM
 
 
 def test_sheets_mock_log(tmp_path, monkeypatch):

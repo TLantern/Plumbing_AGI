@@ -239,8 +239,10 @@ class AudioProcessingConfig:
         self.vad_aggressiveness = 2
         self.vad_frame_duration_ms = 30
         self.silence_timeout_sec = 2.0
+        self.problem_details_silence_timeout_sec = 3.0  # Longer timeout specifically for problem details phase
         self.min_speech_duration_sec = 0.5
-        self.chunk_duration_sec = 2.0
+        self.chunk_duration_sec = 4.0  # Regular chunk duration for normal conversations
+        self.problem_details_chunk_duration_sec = 15.0  # Extended chunk duration specifically for problem details phase
         self.preroll_ignore_sec = 0.5
         self.min_start_rms = 100
         

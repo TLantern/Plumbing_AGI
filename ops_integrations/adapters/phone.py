@@ -102,7 +102,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://cd1864cc8a91.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = "https://de9b49ba94c2.ngrok-free.app"  # Replace with your ngrok URL
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
@@ -113,10 +113,12 @@ FAST_TRANSCRIPTION_PROMPT = "Caller describing plumbing issue. Focus on clear hu
 VAD_AGGRESSIVENESS = 1  # Less aggressive = more sensitive to quiet speech
 VAD_FRAME_DURATION_MS = 20  # 20ms = optimal for speech detection accuracy
 SILENCE_TIMEOUT_SEC = 1.8  # Balanced - allows natural pauses but not too long
-MIN_SPEECH_DURATION_SEC = 0.8  # Longer = filter out more noise, better quality
-CHUNK_DURATION_SEC = 4.0  # Longer chunks = more context for transcription
+PROBLEM_DETAILS_SILENCE_TIMEOUT_SEC = 3.0  # Longer timeout specifically for problem details phase
+MIN_SPEECH_DURATION_SEC = 0.5  # Longer = filter out more noise, better quality
+CHUNK_DURATION_SEC = 4.0  # Regular chunk duration for normal conversations
+PROBLEM_DETAILS_CHUNK_DURATION_SEC = 15.0  # Extended chunk duration specifically for problem details phase
 PREROLL_IGNORE_SEC = 0.1  # Shorter = start listening sooner
-MIN_START_RMS = 80  # Lower = more sensitive to quiet speech
+MIN_START_RMS = 85  # Lower = more sensitive to quiet speech
 FAST_RESPONSE_MODE = False  # Disabled for better quality over speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
@@ -858,9 +860,9 @@ async def ops_action_approve(request: Request):
         )
         # Sync to Google Sheets CRM (mock or live)
         try:
-            from ..adapters.sheets import GoogleSheetsCRM  # type: ignore
+            from .adapters.external_services.sheets import GoogleSheetsCRM  # type: ignore
         except Exception:
-            from adapters.sheets import GoogleSheetsCRM  # type: ignore
+            from adapters.external_services.sheets import GoogleSheetsCRM  # type: ignore
         sheets = GoogleSheetsCRM()
         booking_row = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -1041,7 +1043,7 @@ async def _finalize_booking_if_ready(call_sid: str) -> bool:
         try:
             from .sheets import GoogleSheetsCRM  # type: ignore
         except Exception:
-            from ops_integrations.adapters.sheets import GoogleSheetsCRM  # type: ignore
+            from ops_integrations.adapters.external_services.sheets import GoogleSheetsCRM  # type: ignore
         sheets = GoogleSheetsCRM()
         appt_iso = suggested_time.isoformat()
         if not appt_iso.endswith('Z') and '+' not in appt_iso:
@@ -1648,27 +1650,38 @@ async def process_audio(call_sid: str, audio: bytes):
                     # We were speaking, add this frame to pending audio (might be pause)
                     vad_state['pending_audio'].extend(frame_bytes)
                     
-                    # Check if silence timeout exceeded
+                    # Check if silence timeout exceeded - use longer timeout for problem details phase
                     silence_duration = current_time - vad_state['last_speech_time']
-                    if silence_duration >= SILENCE_TIMEOUT_SEC:
+                    
+                    # Determine appropriate silence timeout based on dialog state
+                    dialog = call_dialog_state.get(call_sid, {})
+                    current_silence_timeout = PROBLEM_DETAILS_SILENCE_TIMEOUT_SEC if dialog.get('step') == 'awaiting_problem_details' else SILENCE_TIMEOUT_SEC
+                    
+                    if silence_duration >= current_silence_timeout:
                         # End of speech detected
                         speech_duration = current_time - vad_state['speech_start_time']
                         pending_duration_ms = len(vad_state['pending_audio']) / (sample_rate * SAMPLE_WIDTH) * 1000
                         
-                        logger.info(f"🔇 SPEECH ENDED for {call_sid}: {speech_duration:.2f}s total, {pending_duration_ms:.0f}ms buffered, {silence_duration:.2f}s silence")
+                        # Log which timeout was used
+                        timeout_type = "problem_details" if dialog.get('step') == 'awaiting_problem_details' else "regular"
+                        logger.info(f"🔇 SPEECH ENDED for {call_sid}: {speech_duration:.2f}s total, {pending_duration_ms:.0f}ms buffered, {silence_duration:.2f}s silence (timeout: {timeout_type})")
                         
                         if speech_duration >= MIN_SPEECH_DURATION_SEC:
                             # Valid speech segment, process it
                             logger.info(f"✅ Processing valid speech segment for {call_sid}")
-                            await process_speech_segment(call_sid, vad_state['pending_audio'])
-                            # Mark first speech as processed
-                            vad_state['has_processed_first_speech'] = True
-                            # Clear ALL buffers to prevent double-processing the same audio
-                            vad_state['fallback_buffer'] = bytearray()
-                            audio_buffers[call_sid] = bytearray()
-                            # Mark the time when we last processed via VAD to prevent immediate fallback
-                            vad_state['last_vad_process_time'] = current_time
-                            vad_state['last_chunk_time'] = current_time  # Also update chunk time
+                            # Check if already processing to prevent multiple simultaneous processing
+                            if not vad_state.get('processing_lock', False):
+                                await process_speech_segment(call_sid, vad_state['pending_audio'])
+                                # Mark first speech as processed
+                                vad_state['has_processed_first_speech'] = True
+                                # Clear ALL buffers to prevent double-processing the same audio
+                                vad_state['fallback_buffer'] = bytearray()
+                                audio_buffers[call_sid] = bytearray()
+                                # Mark the time when we last processed via VAD to prevent immediate fallback
+                                vad_state['last_vad_process_time'] = current_time
+                                vad_state['last_chunk_time'] = current_time  # Also update chunk time
+                            else:
+                                logger.info(f"🚫 Skipping VAD speech processing for {call_sid} - already processing")
                         else:
                             logger.warning(f"❌ Speech too short for {call_sid} ({speech_duration:.2f}s < {MIN_SPEECH_DURATION_SEC}s), discarding")
                         
@@ -1687,15 +1700,24 @@ async def process_audio(call_sid: str, audio: bytes):
     # Fallback: if we've been collecting audio for too long, force processing (VAD path)
     if vad_state['is_speaking']:
         speech_duration = current_time - vad_state['speech_start_time']
-        if speech_duration >= CHUNK_DURATION_SEC:
-            logger.debug(f"Forcing processing due to max duration for {call_sid}")
-            await process_speech_segment(call_sid, vad_state['pending_audio'])
-            # Clear ALL buffers to prevent double-processing the same audio
-            vad_state['fallback_buffer'] = bytearray()
-            audio_buffers[call_sid] = bytearray()
-            # Mark the time when we processed via VAD to prevent immediate fallback
-            vad_state['last_vad_process_time'] = current_time
-            vad_state['last_chunk_time'] = current_time  # Also update chunk time
+        
+        # Determine appropriate chunk duration based on dialog state
+        dialog = call_dialog_state.get(call_sid, {})
+        current_chunk_duration = PROBLEM_DETAILS_CHUNK_DURATION_SEC if dialog.get('step') == 'awaiting_problem_details' else CHUNK_DURATION_SEC
+        
+        if speech_duration >= current_chunk_duration:
+            logger.debug(f"Forcing processing due to max duration for {call_sid} (chunk_duration: {current_chunk_duration}s)")
+            # Check if already processing to prevent multiple simultaneous processing
+            if not vad_state.get('processing_lock', False):
+                await process_speech_segment(call_sid, vad_state['pending_audio'])
+                # Clear ALL buffers to prevent double-processing the same audio
+                vad_state['fallback_buffer'] = bytearray()
+                audio_buffers[call_sid] = bytearray()
+                # Mark the time when we processed via VAD to prevent immediate fallback
+                vad_state['last_vad_process_time'] = current_time
+                vad_state['last_chunk_time'] = current_time  # Also update chunk time
+            else:
+                logger.info(f"🚫 Skipping forced processing for {call_sid} - already processing")
             vad_state['is_speaking'] = False
             vad_state['pending_audio'] = bytearray()
 
@@ -1709,18 +1731,28 @@ async def process_audio(call_sid: str, audio: bytes):
         
         # Only trigger fallback if:
         # 1. Not currently speaking
-        # 2. Have enough audio buffered
+        # 2. Have enough audio buffered (conditional based on dialog state)
         # 3. Haven't processed via VAD recently (prevent double processing)
-        # 4. Haven't processed via fallback recently (prevent rapid re-processing)
-        # 5. For first speech, wait longer to ensure complete audio
-        first_speech_processed = vad_state.get('has_processed_first_speech', False)
-        min_wait_time = 5.0 if not first_speech_processed else 3.0  # Wait longer for first speech
+        # 4. Haven't processed via fallback recently (prevent excessive processing)
+        # 5. Not currently processing (check processing lock)
+        
+        # Determine appropriate fallback duration based on dialog state
+        dialog = call_dialog_state.get(call_sid, {})
+        if dialog.get('step') == 'awaiting_problem_details':
+            min_fallback_duration = 10.0  # Require at least 10 seconds of audio before fallback for problem details
+            time_since_vad_threshold = 5.0  # Wait longer after VAD processing
+            time_since_chunk_threshold = 8.0  # Wait longer between fallback processes
+        else:
+            min_fallback_duration = 4.0  # Regular fallback duration for normal conversations
+            time_since_vad_threshold = 3.0  # Regular wait time after VAD processing
+            time_since_chunk_threshold = 5.0  # Regular wait time between fallback processes
         
         if (not vad_state['is_speaking'] and 
-            fallback_bytes >= int(sample_rate * SAMPLE_WIDTH * CHUNK_DURATION_SEC) and
-            time_since_vad > min_wait_time and
-            time_since_chunk > min_wait_time):
-            logger.info(f"⏱️ Time-based fallback flush for {call_sid}: {fallback_bytes} bytes (~{CHUNK_DURATION_SEC}s)")
+            not vad_state.get('processing_lock', False) and
+            fallback_bytes >= int(sample_rate * SAMPLE_WIDTH * min_fallback_duration) and
+            time_since_vad > time_since_vad_threshold and
+            time_since_chunk > time_since_chunk_threshold):
+            logger.info(f"⏱️ Time-based fallback flush for {call_sid}: {fallback_bytes} bytes (~{min_fallback_duration}s)")
             await process_speech_segment(call_sid, vad_state['fallback_buffer'])
             vad_state['fallback_buffer'] = bytearray()
             vad_state['last_chunk_time'] = current_time
@@ -2117,6 +2149,7 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
     # Scheduling/path and confirmation follow-up handling
     if dialog and dialog.get('step') in (
         'awaiting_path_choice',
+        'awaiting_problem_details',
         'awaiting_time',
         'awaiting_time_confirm',
         'awaiting_location_confirm',
@@ -2138,20 +2171,43 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
         explicit_time = parse_human_datetime(text) or gpt_infer_datetime_phrase(text)
         explicit_emergency = contains_emergency_keywords(text)
     
-    # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
-    # But skip deferring if we've already collected their name and this is their first plumbing issue description
+    # Check if this is a plumbing issue and we haven't asked for problem details yet
     info = call_info_store.get(call_sid, {})
     segments_count = int(info.get('segments_count', 0)) + 1
     info['segments_count'] = segments_count
     call_info_store[call_sid] = info
     
-    # Check if we've collected name - if so, proceed directly with intent handling
     dialog = call_dialog_state.get(call_sid, {})
-    name_collected = dialog.get('step') == 'name_collected' or dialog.get('customer_name')
     
+    # Check if this is a plumbing issue and we haven't asked for problem details yet
+    job_type = intent.get('job', {}).get('type', '')
+    is_plumbing_issue = job_type and job_type != 'general_inquiry'
+    
+    if (is_plumbing_issue and 
+        not explicit_time and 
+        not explicit_emergency and 
+        not dialog.get('problem_details_asked')):
+        
+        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_problem_details', 'problem_details_asked': True}
+        logger.info(f"🔍 ASKING FOR PROBLEM DETAILS: Plumbing issue identified from {call_sid} - asking specifically how and when it started")
+        twiml = VoiceResponse()
+        await add_tts_or_say_to_twiml(
+            twiml,
+            call_sid,
+            f"Tell me more about your {_speakable(job_type)}, specifically how and when it started."
+        )
+        start = Start()
+        wss_url = _build_wss_url_for_resume(call_sid)
+        start.stream(url=wss_url, track="inbound_track")
+        twiml.append(start)
+        twiml.pause(length=3600)
+        await push_twiml_to_call(call_sid, twiml)
+        return
+    
+    # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
     if (segments_count < 2 and not explicit_time and not explicit_emergency and 
-        not is_affirmative_response(text) and not name_collected):
-        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+        not is_affirmative_response(text)):
+        # Don't set any step yet - just continue listening
         logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
         return
     twiml = await handle_intent(call_sid, intent)
@@ -3294,6 +3350,59 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             append_stream_and_pause(twiml)
             return twiml
         
+        # Handle awaiting_problem_details step - user providing more details about their problem
+        if state.get('step') == 'awaiting_problem_details':
+            # Save the detailed response as notes with specific how/when information
+            detailed_notes = f"Customer details - How and when it started: {followup_text}"
+            
+            # Ensure job section exists and update description
+            if 'job' not in intent:
+                intent['job'] = {}
+            intent['job']['description'] = detailed_notes
+            
+            # Update the dialog state to preserve the enhanced intent
+            state['intent'] = intent
+            call_dialog_state[call_sid] = state
+            
+            # Log the detailed information prominently
+            logger.info(f"💬 RECEIVED DETAILED PROBLEM DESCRIPTION for {call_sid}:")
+            logger.info(f"   🔧 Service Type: {intent.get('job', {}).get('type', 'plumbing issue')}")
+            logger.info(f"   📝 Customer's description of how and when it started: {followup_text}")
+            logger.info(f"   💾 Saved as job notes: {detailed_notes}")
+            logger.info(f"   ✅ Problem details collected successfully for {call_sid}")
+            
+            # Get job type for the response
+            job_type = intent.get('job', {}).get('type', 'plumbing issue')
+            urgency = intent.get('job', {}).get('urgency', 'flex')
+            
+            # Now proceed with the original emergency vs scheduling flow
+            if urgency == 'emergency':
+                try:
+                    calendar_adapter = CalendarAdapter()
+                    now = datetime.now()
+                    # Emergency: at least 30 minutes from now, quarter-hour aligned, 1h buffer from other jobs
+                    earliest = now + timedelta(minutes=30)
+                    suggested = find_next_compliant_slot(earliest, emergency=True)
+                    # Send magiclink immediately and hold this time (skip actual SMS in flow for now)
+                    ok = True
+                    await add_tts_or_say_to_twiml(twiml, call_sid, f"Thanks for telling me more about your {_speakable(job_type)}. This sounds urgent. The closest available technician is {_format_slot(suggested)}. Do you want this time? Please say YES or NO.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
+                except Exception as e:
+                    logger.error(f"Emergency slot suggestion failed: {e}")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Thanks for telling me more about your plumbing issue. I'm checking the earliest availability. One moment, please.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
+            else:
+                # Ask for path: emergency vs schedule (combined with thank you message)
+                await add_tts_or_say_to_twiml(
+                    twiml,
+                    call_sid,
+                    f"Thanks for telling me more about your {_speakable(job_type)}. For your {_speakable(job_type)}, is this an emergency, or would you like to book a technician to come check it out?"
+                )
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+            
+            append_stream_and_pause(twiml)
+            return twiml
+        
         # Handle awaiting_clear_intent step - user responding to clarification request
         if state.get('step') == 'awaiting_clear_intent':
             # Check if this is still a goodbye statement
@@ -3585,13 +3694,24 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
             call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
     else:
-        # Ask for path: emergency vs schedule
-        await add_tts_or_say_to_twiml(
-            twiml,
-            call_sid,
-            f"Got it. For your {_speakable(job_type)}, is this an emergency, or would you like to book a technician to come check it out?"
-        )
-        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+        # Check if we need to ask for problem details first
+        dialog = call_dialog_state.get(call_sid, {})
+        if not dialog.get('problem_details_asked'):
+            # Ask for problem details first
+            await add_tts_or_say_to_twiml(
+                twiml,
+                call_sid,
+                f"Tell me more about your {_speakable(job_type)}, specifically how and when it started."
+            )
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_problem_details', 'problem_details_asked': True}
+        else:
+            # Problem details already collected, proceed to path choice
+            await add_tts_or_say_to_twiml(
+                twiml,
+                call_sid,
+                f"Got it. For your {_speakable(job_type)}, is this an emergency, or would you like to book a technician to come check it out?"
+            )
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
     append_stream_and_pause(twiml)
     logger.info(f"Handled intent {intent} for CallSid={call_sid}")
     return twiml
@@ -4487,7 +4607,7 @@ def remove_repeated_phrases(text: str) -> str:
     
     # Split into words
     words = text.split()
-    if len(words) <= 2:
+    if len(words) <= 1:
         return text
     
     # Remove consecutive repeated words

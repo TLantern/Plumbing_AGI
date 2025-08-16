@@ -44,7 +44,7 @@ class TestAudioProcessor:
         # Transcription configuration (same as phone_service.py)
         self.use_local_whisper = False
         self.use_remote_whisper = True
-        self.remote_whisper_url = whisper_url or "https://cd1864cc8a91.ngrok-free.app"
+        self.remote_whisper_url = whisper_url or "https://de9b49ba94c2.ngrok-free.app"
         self.transcription_model = "whisper-1"
         self.fast_transcription_prompt = "Caller describing plumbing issue. Focus on clear human speech. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Maintain natural speech patterns and context."
         
@@ -52,8 +52,10 @@ class TestAudioProcessor:
         self.vad_aggressiveness = 2  # Reduced from 3 - less aggressive filtering for better sensitivity
         self.vad_frame_duration_ms = 30  # Increased from 20ms - better accuracy for voice detection
         self.silence_timeout_sec = 2.0  # Increased from 1.5s - allow longer natural pauses
+        self.problem_details_silence_timeout_sec = 3.0  # Longer timeout specifically for problem details phase
         self.min_speech_duration_sec = 0.5  # Increased from 0.3s - filter out brief noise
-        self.chunk_duration_sec = 2.0  # Increased from 2.0s - more context for processing
+        self.chunk_duration_sec = 4.0  # Regular chunk duration for normal conversations
+        self.problem_details_chunk_duration_sec = 15.0  # Extended chunk duration specifically for problem details phase
         self.preroll_ignore_sec = 0.5  # Increased from 0.4s - better initial speech detection
         self.min_start_rms = 100  # Reduced from 130 - more sensitive to quiet speech
         self.fast_response_mode = False  # Disabled for better quality over speed
@@ -234,9 +236,14 @@ class TestAudioProcessor:
                         # We were speaking, add this frame to pending audio (might be pause)
                         vad_state['pending_audio'].extend(frame_bytes)
                         
-                        # Check if silence timeout exceeded
+                        # Check if silence timeout exceeded - use longer timeout for problem details phase
                         silence_duration = current_time - vad_state['last_speech_time']
-                        if silence_duration >= self.silence_timeout_sec:
+                        
+                        # For test purposes, we'll use the regular timeout since we don't have dialog state
+                        # In production, this would check the dialog state like in phone_service.py
+                        current_silence_timeout = self.silence_timeout_sec
+                        
+                        if silence_duration >= current_silence_timeout:
                             # End of speech detected
                             speech_duration = current_time - vad_state['speech_start_time']
                             pending_duration_ms = len(vad_state['pending_audio']) / (sample_rate * self.sample_width) * 1000
