@@ -117,7 +117,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://8224a1a4accc.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = "https://cd1864cc8a91.ngrok-free.app"  # Replace with your ngrok URL
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
@@ -131,7 +131,7 @@ SILENCE_TIMEOUT_SEC = 2.0  # Increased from 1.5s - allow longer natural pauses
 MIN_SPEECH_DURATION_SEC = 0.5  # Increased from 0.3s - filter out brief noise
 CHUNK_DURATION_SEC = 2.0  # Increased from 2.0s - more context for processing
 PREROLL_IGNORE_SEC = 0.5  # Increased from 0.4s - better initial speech detection
-MIN_START_RMS = 120  # Reduced from 130 - more sensitive to quiet speech
+MIN_START_RMS = 80  # Reduced from 130 - more sensitive to quiet speech
 FAST_RESPONSE_MODE = False  # Disabled for better quality over speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
@@ -1722,9 +1722,29 @@ async def process_audio(call_sid: str, audio: bytes):
 
 async def process_speech_segment(call_sid: str, audio_data: bytearray):
     """Process a detected speech segment"""
-    sample_rate = audio_config_store.get(call_sid, {}).get('sample_rate', SAMPLE_RATE_DEFAULT)
-    audio_duration_ms = len(audio_data) / (sample_rate * SAMPLE_WIDTH) * 1000
-    logger.info(f"Processing speech segment for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms duration")
+    # Check processing lock to prevent multiple simultaneous processing
+    vad_state = vad_states.get(call_sid, {})
+    if vad_state.get('processing_lock', False):
+        logger.info(f"🚫 Skipping speech processing for {call_sid} - already processing")
+        return
+    
+    # Set processing lock
+    vad_state['processing_lock'] = True
+    
+    try:
+        sample_rate = audio_config_store.get(call_sid, {}).get('sample_rate', SAMPLE_RATE_DEFAULT)
+        audio_duration_ms = len(audio_data) / (sample_rate * SAMPLE_WIDTH) * 1000
+        logger.info(f"Processing speech segment for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms duration")
+        
+        # Mark first speech as processed
+        if not vad_state.get('has_processed_first_speech', False):
+            vad_state['has_processed_first_speech'] = True
+            logger.info(f"🎯 First speech processed for {call_sid}")
+            
+    except Exception as e:
+        logger.error(f"Error in speech segment processing for {call_sid}: {e}")
+        vad_state['processing_lock'] = False
+        return
     
     # Audio fingerprinting to prevent processing the same audio multiple times
     try:
@@ -1902,7 +1922,7 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
             }
             if any(p in normalized for p in confirm_phrases):
                 should_suppress = False
-                logger.info(f"🎯 Accepting confirmation phrase '{text}' in step '{dialog.get('step')}' despite low confidence for {call_sid}")
+                logger.info(f"🎯 PATTERN MATCHED: Accepting confirmation phrase '{text}' in step '{dialog.get('step')}' despite low confidence for {call_sid}")
         
         if should_suppress:
             logger.info(f"Suppressed low-confidence/short transcription for {call_sid}: '{text}' (avg_logprob={mean_lp})")
@@ -1961,6 +1981,9 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
     except Exception as e:
         logger.error(f"Speech processing error for {call_sid}: {e}")
         logger.debug(f"Failed audio details for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms")
+    finally:
+        # Release processing lock
+        vad_state['processing_lock'] = False
 
 async def response_to_user_speech(call_sid: str, text: str) -> None:
     """Handle user speech response after transcription is complete"""
@@ -2120,9 +2143,28 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
     
     if (segments_count < 2 and not explicit_time and not explicit_emergency and 
         not is_affirmative_response(text) and not name_collected):
-        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
-        logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
-        return
+        # For the first plumbing issue description, ask for more details instead of deferring
+        if name_collected:
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_problem_details'}
+            logger.info(f"🔍 ASKING FOR PROBLEM DETAILS: First plumbing issue from {call_sid} - asking specifically how and when it started")
+            twiml = VoiceResponse()
+            job_type = intent.get('job', {}).get('type', 'plumbing issue')
+            await add_tts_or_say_to_twiml(
+                twiml,
+                call_sid,
+                f"Tell me more about your {_speakable(job_type)}, specifically how and when it started."
+            )
+            start = Start()
+            wss_url = _build_wss_url_for_resume(call_sid)
+            start.stream(url=wss_url, track="inbound_track")
+            twiml.append(start)
+            twiml.pause(length=3600)
+            await push_twiml_to_call(call_sid, twiml)
+            return
+        else:
+            call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+            logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
+            return
     twiml = await handle_intent(call_sid, intent)
     await push_twiml_to_call(call_sid, twiml)
 
@@ -2319,8 +2361,8 @@ async def _activate_speech_gate(call_sid: str, text: str):
         base_duration = (word_count / 150) * 60  # Base duration in seconds
         actual_duration = base_duration / settings.OPENAI_TTS_SPEED  # Adjust for speed
         
-        # Add buffer time for network latency and processing
-        buffer_time = settings.SPEECH_GATE_BUFFER_SEC
+        # Reduce buffer time for more responsive listening
+        buffer_time = min(settings.SPEECH_GATE_BUFFER_SEC, 0.5)  # Cap at 0.5s for faster response
         gate_duration = actual_duration + buffer_time
         
         # Activate the speech gate
@@ -2330,7 +2372,7 @@ async def _activate_speech_gate(call_sid: str, text: str):
         
         logger.info(f"🔇 Speech gate activated for {call_sid}: {gate_duration:.2f}s (text: {len(text)} chars)")
         
-        # Schedule gate deactivation
+        # Schedule gate deactivation with shorter delay for more responsive listening
         asyncio.create_task(_deactivate_speech_gate_after_delay(call_sid, gate_duration))
         
     except Exception as e:
@@ -2512,9 +2554,11 @@ def extract_name_from_text(text: str) -> str:
     
     # Common name introduction patterns
     name_patterns = [
-        r"(?:my name is|i'm|i am|this is|it's|it is|call me)\s+([a-zA-Z][a-zA-Z\s]+)",
-        r"^([a-zA-Z][a-zA-Z\s]+?)(?:\s+here|$)",  # Simple name at start
-        r"([a-zA-Z][a-zA-Z\s]+)",  # Any sequence of letters as fallback
+        r"(?:my name is|i'm|i am|this is|it's|it is|call me)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",
+        r"^([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+?)(?:\s+here|$)",  # Simple name at start
+        r"(?:i saw|i met|i know)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "I saw Daniel" type patterns
+        r"(?:this is|that's|that is)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "This is Daniel" type patterns
+        r"^(?:um|uh|well|so|like|just)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # Handle filler words before names
     ]
     
     for pattern in name_patterns:
@@ -2525,13 +2569,70 @@ def extract_name_from_text(text: str) -> str:
             skip_words = {
                 'hello', 'hi', 'hey', 'good', 'morning', 'afternoon', 'evening', 
                 'yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'calling', 'about',
-                'speaking', 'here', 'with', 'you', 'the', 'a', 'an', 'and'
+                'speaking', 'here', 'with', 'you', 'the', 'a', 'an', 'and',
+                'saw', 'met', 'know', 'is', 'that',
+                'thank', 'thanks', 'no', 'nope', 'nah'
             }
-            # Only return if it's not in skip words and has reasonable length
-            if (name.lower() not in skip_words and 
+            # Check if any word in the name is in skip words
+            name_words = name.lower().split()
+            if (not any(word in skip_words for word in name_words) and 
                 len(name) >= 2 and len(name) <= 50 and 
-                not any(char.isdigit() for char in name)):
-                return name
+                not any(char.isdigit() for char in name) and
+                all(char.isalpha() or char in ['-', "'", ' '] for char in name)):
+                
+                # For multi-word names, return only the first word
+                if ' ' in name:
+                    first_name = name.split()[0]
+                    # Only return if first name is not a skip word
+                    if first_name.lower() not in skip_words:
+                        return first_name
+                else:
+                    return name
+    
+    # If no name found with regex patterns, try GPT as fallback
+    try:
+        from openai import OpenAI
+        import os
+        
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        prompt = f"""
+        Extract the person's name from this text. Return ONLY the name, nothing else.
+        If no clear name is found, return "None".
+        
+        Examples:
+        "um Sean" -> "Sean"
+        "I'm John" -> "John"
+        "My name is Sarah" -> "Sarah"
+        "Thank you" -> "None"
+        "Hello" -> "None"
+        
+        Text: "{text}"
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=10,
+            temperature=0
+        )
+        
+        name = response.choices[0].message.content.strip()
+        
+        # Validate the response
+        if name.lower() in ['none', 'no', 'n/a', '']:
+            return None
+            
+        # Basic validation - should be letters, hyphens, apostrophes, reasonable length
+        # Allow common punctuation like periods, commas, exclamation marks
+        if (name and len(name) >= 2 and len(name) <= 50 and 
+            all(char.isalpha() or char in ['-', "'", ' '] for char in name) and
+            not any(char.isdigit() for char in text) and
+            not any(char in ['@', '#', '$', '%', '&', '*', '+', '=', '<', '>', '[', ']', '{', '}', '(', ')', '|', '\\', '/', '`', '~', '^'] for char in text)):
+            return name.title()
+            
+    except Exception as e:
+        logger.debug(f"GPT name extraction failed: {e}")
     
     return None
 
@@ -2773,6 +2874,9 @@ def is_affirmative_response(text: str) -> bool:
     norm = " ".join((text or "").lower().strip().strip(".,!?").split())
     if norm in AFFIRMATIVE_PATTERNS:
         return True
+    # Check if "yes" appears anywhere in the text (for phrases like "I said yes")
+    if "yes" in norm:
+        return True
     # Token-based checks
     words = norm.split()
     # Short generic confirmations only (avoid long sentences like "yeah, my ...")
@@ -2818,6 +2922,9 @@ def is_strict_affirmative_response(text: str) -> bool:
     # Must be exact match or start with yes/yeah/yep
     if norm in STRICT_YES_PATTERNS:
         return True
+    # Check if "yes" appears anywhere in the text (for phrases like "I said yes")
+    if "yes" in norm:
+        return True
     words = norm.split()
     if len(words) <= 2 and words[0] in {"yes", "yeah", "yep", "yup", "correct", "affirmative", "sure", "okay", "ok", "right", "exactly", "absolutely", "definitely"}:
         return True
@@ -2835,6 +2942,9 @@ def is_strict_negative_response(text: str) -> bool:
     """Strict no detection for appointment confirmation - only accepts clear negatives"""
     norm = " ".join((text or "").lower().strip().strip(".,!?").split())
     if norm in STRICT_NO_PATTERNS:
+        return True
+    # Check if "no" appears anywhere in the text (for phrases like "I said no")
+    if "no" in norm:
         return True
     words = norm.split()
     if len(words) <= 2 and words[0] in {"no", "nope", "nah", "negative"}:
@@ -3178,6 +3288,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
     
     # Handle very low confidence or no clear service intent
     if not followup_text and has_no_clear_service_intent(intent):
+        logger.info(f"🔍 ASKING FOR CLEARER INTENT: No clear service intent detected for {call_sid} - requesting specific plumbing issue details")
         await add_tts_or_say_to_twiml(
             twiml, 
             call_sid, 
@@ -3240,6 +3351,57 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     "I'm having trouble understanding. Let me connect you with one of our dispatchers who can better assist you."
                 )
                 return twiml
+        
+        # Handle awaiting_problem_details step - user providing more details about their problem
+        if state.get('step') == 'awaiting_problem_details':
+            # Save the detailed response as notes with specific how/when information
+            detailed_notes = f"Customer details - How and when it started: {followup_text}"
+            intent['job']['description'] = detailed_notes
+            
+            # Log the detailed information
+            logger.info(f"💬 RECEIVED DETAILED PROBLEM DESCRIPTION for {call_sid}:")
+            logger.info(f"   🔧 Service: {intent.get('job', {}).get('type', 'plumbing issue')}")
+            logger.info(f"   📝 How and when it started: {followup_text}")
+            logger.info(f"   💾 Saved as notes: {detailed_notes}")
+            
+            # Get job type for the response
+            job_type = intent.get('job', {}).get('type', 'plumbing issue')
+            urgency = state.get('urgency', 'flex')
+            
+            # Thank them for providing more details
+            await add_tts_or_say_to_twiml(
+                twiml,
+                call_sid,
+                f"Thanks for telling me more about your {_speakable(job_type)}."
+            )
+            
+            # Now proceed with the original emergency vs scheduling flow
+            if urgency == 'emergency':
+                try:
+                    calendar_adapter = CalendarAdapter()
+                    now = datetime.now()
+                    # Emergency: at least 30 minutes from now, quarter-hour aligned, 1h buffer from other jobs
+                    earliest = now + timedelta(minutes=30)
+                    suggested = find_next_compliant_slot(earliest, emergency=True)
+                    # Send magiclink immediately and hold this time (skip actual SMS in flow for now)
+                    ok = True
+                    await add_tts_or_say_to_twiml(twiml, call_sid, f"This sounds urgent. The closest available technician for {_speakable(job_type)} is {_format_slot(suggested)}. Do you want this time? Please say YES or NO.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': suggested}
+                except Exception as e:
+                    logger.error(f"Emergency slot suggestion failed: {e}")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I'm checking the earliest availability. One moment, please.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm'}
+            else:
+                # Ask for path: emergency vs schedule
+                await add_tts_or_say_to_twiml(
+                    twiml,
+                    call_sid,
+                    f"For your {_speakable(job_type)}, is this an emergency, or would you like to book a technician to come check it out?"
+                )
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_path_choice'}
+            
+            append_stream_and_pause(twiml)
+            return twiml
         
         # New: awaiting_location_confirm step
         if False and state.get('step') == 'awaiting_location_confirm':
@@ -3339,6 +3501,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         # Confirmation step: user can confirm or change the suggested slot - STRICT YES/NO ONLY
         if state.get('step') == 'awaiting_time_confirm':
             if is_strict_affirmative_response(followup_text):
+                logger.info(f"✅ YES DETECTED: User confirmed appointment for {call_sid} with response: '{followup_text}'")
                 # User said YES - proceed to operator
                 suggested_time = state.get('suggested_time')
                 if isinstance(suggested_time, datetime):
@@ -3352,6 +3515,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     append_stream_and_pause(twiml)
                     return twiml
             elif is_strict_negative_response(followup_text):
+                logger.info(f"❌ NO DETECTED: User declined appointment for {call_sid} with response: '{followup_text}'")
                 # User said NO - go back to scheduling
                 await add_tts_or_say_to_twiml(twiml, call_sid, "No problem. Tell me what date and time would work better for you, or say 'earliest' for the next available slot.")
                 call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
@@ -3359,6 +3523,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 return twiml
             else:
                 # Ambiguous response - ask again with strict instructions
+                logger.info(f"❓ AMBIGUOUS RESPONSE: User response '{followup_text}' for {call_sid} was not clearly yes or no - asking for clarification")
                 suggested_time = state.get('suggested_time')
                 if isinstance(suggested_time, datetime):
                     await add_tts_or_say_to_twiml(twiml, call_sid, f"I need a clear answer. Do you want the appointment at {_format_slot(suggested_time)}? Please say exactly YES if you want it, or NO if you don't.")
@@ -3479,6 +3644,8 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         return twiml
 
     # Initial intent handling (no <Gather>; we keep streaming and listen continuously)
+    # This section is now handled in response_to_user_speech for the first plumbing issue
+    # For followup responses, proceed with the original emergency vs scheduling flow
     if urgency == 'emergency':
         try:
             calendar_adapter = CalendarAdapter()
@@ -3693,6 +3860,7 @@ def reset_unclear_attempts(call_sid: str) -> None:
         call_info_store[call_sid] = st
 
 async def ask_for_specifics(twiml: VoiceResponse, call_sid: str) -> None:
+    logger.info(f"🔍 ASKING FOR SPECIFICS: Requesting more details about plumbing issue for {call_sid}")
     await add_tts_or_say_to_twiml(
         twiml,
         call_sid,

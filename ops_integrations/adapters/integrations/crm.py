@@ -54,8 +54,19 @@ class CRMAdapter:
         self.inquiries_table_id = os.getenv('BASEROW_INQUIRIES_TABLE_ID')
         self.interactions_table_id = os.getenv('BASEROW_INTERACTIONS_TABLE_ID')
         
+        # Check if all required variables are present and not placeholder values
+        placeholder_patterns = ['your_', '_here', 'placeholder']
+        
+        def is_placeholder(value):
+            if not value:
+                return True
+            return any(pattern in value.lower() for pattern in placeholder_patterns)
+        
         if not all([self.api_token, self.database_id, self.customers_table_id]):
             logging.warning("Baserow CRM not configured - missing required environment variables")
+            self.enabled = False
+        elif any(is_placeholder(val) for val in [self.api_token, self.database_id, self.customers_table_id]):
+            logging.warning("Baserow CRM not configured - using placeholder values in environment variables")
             self.enabled = False
         else:
             self.enabled = True

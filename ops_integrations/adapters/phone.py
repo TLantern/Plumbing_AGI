@@ -102,21 +102,21 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = "https://8224a1a4accc.ngrok-free.app"  # Replace with your ngrok URL
+REMOTE_WHISPER_URL = "https://cd1864cc8a91.ngrok-free.app"  # Replace with your ngrok URL
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
 # Enhanced prompt for better transcription quality
 FAST_TRANSCRIPTION_PROMPT = "Caller describing plumbing issue. Focus on clear human speech. Ignore background noise, dial tones, hangup signals, beeps, clicks, static, and other audio artifacts. Maintain natural speech patterns and context."
 
-# VAD Configuration
-VAD_AGGRESSIVENESS = 2  # Reduced from 3 - less aggressive filtering for better sensitivity
-VAD_FRAME_DURATION_MS = 30  # Increased from 20ms - better accuracy for voice detection
-SILENCE_TIMEOUT_SEC = 2.0  # Increased from 1.5s - allow longer natural pauses
-MIN_SPEECH_DURATION_SEC = 0.5  # Increased from 0.3s - filter out brief noise
-CHUNK_DURATION_SEC = 3.0  # Increased from 2.0s - more context for processing
-PREROLL_IGNORE_SEC = 0.5  # Increased from 0.4s - better initial speech detection
-MIN_START_RMS = 120  # Reduced from 130 - more sensitive to quiet speech
+# VAD Configuration - Tuned for Better Quality
+VAD_AGGRESSIVENESS = 1  # Less aggressive = more sensitive to quiet speech
+VAD_FRAME_DURATION_MS = 20  # 20ms = optimal for speech detection accuracy
+SILENCE_TIMEOUT_SEC = 1.8  # Balanced - allows natural pauses but not too long
+MIN_SPEECH_DURATION_SEC = 0.8  # Longer = filter out more noise, better quality
+CHUNK_DURATION_SEC = 4.0  # Longer chunks = more context for transcription
+PREROLL_IGNORE_SEC = 0.1  # Shorter = start listening sooner
+MIN_START_RMS = 80  # Lower = more sensitive to quiet speech
 FAST_RESPONSE_MODE = False  # Disabled for better quality over speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
@@ -1563,6 +1563,17 @@ async def process_audio(call_sid: str, audio: bytes):
         audio_buffers[call_sid].extend(audio)
         return
     
+    # Improved first transcription handling - wait longer for initial speech
+    if not vad_state.get('has_processed_first_speech', False):
+        # For the first speech, wait longer to ensure we get complete audio
+        min_initial_buffer_ms = 2000  # Wait 2 seconds for first speech
+        current_buffer_ms = len(audio_buffers[call_sid]) / (sample_rate * SAMPLE_WIDTH) * 1000
+        if current_buffer_ms < min_initial_buffer_ms:
+            # Still building initial buffer
+            audio_buffers[call_sid].extend(audio)
+            vad_state['fallback_buffer'].extend(audio)
+            return
+    
     # Log incoming audio
     logger.debug(f"📡 Received {len(audio)} bytes of PCM16 audio from {call_sid}")
     
@@ -1650,6 +1661,8 @@ async def process_audio(call_sid: str, audio: bytes):
                             # Valid speech segment, process it
                             logger.info(f"✅ Processing valid speech segment for {call_sid}")
                             await process_speech_segment(call_sid, vad_state['pending_audio'])
+                            # Mark first speech as processed
+                            vad_state['has_processed_first_speech'] = True
                             # Clear ALL buffers to prevent double-processing the same audio
                             vad_state['fallback_buffer'] = bytearray()
                             audio_buffers[call_sid] = bytearray()
@@ -1699,10 +1712,14 @@ async def process_audio(call_sid: str, audio: bytes):
         # 2. Have enough audio buffered
         # 3. Haven't processed via VAD recently (prevent double processing)
         # 4. Haven't processed via fallback recently (prevent rapid re-processing)
+        # 5. For first speech, wait longer to ensure complete audio
+        first_speech_processed = vad_state.get('has_processed_first_speech', False)
+        min_wait_time = 5.0 if not first_speech_processed else 3.0  # Wait longer for first speech
+        
         if (not vad_state['is_speaking'] and 
             fallback_bytes >= int(sample_rate * SAMPLE_WIDTH * CHUNK_DURATION_SEC) and
-            time_since_vad > 3.0 and  # Increased from 2.0 to 3.0 seconds
-            time_since_chunk > 3.0):  # Also check time since last fallback processing
+            time_since_vad > min_wait_time and
+            time_since_chunk > min_wait_time):
             logger.info(f"⏱️ Time-based fallback flush for {call_sid}: {fallback_bytes} bytes (~{CHUNK_DURATION_SEC}s)")
             await process_speech_segment(call_sid, vad_state['fallback_buffer'])
             vad_state['fallback_buffer'] = bytearray()
@@ -1727,6 +1744,12 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
         sample_rate = audio_config_store.get(call_sid, {}).get('sample_rate', SAMPLE_RATE_DEFAULT)
         audio_duration_ms = len(audio_data) / (sample_rate * SAMPLE_WIDTH) * 1000
         logger.info(f"Processing speech segment for {call_sid}: {len(audio_data)} bytes, {audio_duration_ms:.0f}ms duration")
+        
+        # Mark first speech as processed
+        if not vad_state.get('has_processed_first_speech', False):
+            vad_state['has_processed_first_speech'] = True
+            logger.info(f"🎯 First speech processed for {call_sid}")
+            
     except Exception as e:
         logger.error(f"Error in speech segment processing for {call_sid}: {e}")
         vad_state['processing_lock'] = False
@@ -2520,9 +2543,11 @@ def extract_name_from_text(text: str) -> str:
     
     # Common name introduction patterns
     name_patterns = [
-        r"(?:my name is|i'm|i am|this is|it's|it is|call me)\s+([a-zA-Z][a-zA-Z\s]+)",
-        r"^([a-zA-Z][a-zA-Z\s]+?)(?:\s+here|$)",  # Simple name at start
-        r"([a-zA-Z][a-zA-Z\s]+)",  # Any sequence of letters as fallback
+        r"(?:my name is|i'm|i am|this is|it's|it is|call me)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",
+        r"^([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+?)(?:\s+here|$)",  # Simple name at start
+        r"(?:i saw|i met|i know)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "I saw Daniel" type patterns
+        r"(?:this is|that's|that is)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # "This is Daniel" type patterns
+        r"^(?:um|uh|well|so|like|just)\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']+)",  # Handle filler words before names
     ]
     
     for pattern in name_patterns:
@@ -2533,13 +2558,70 @@ def extract_name_from_text(text: str) -> str:
             skip_words = {
                 'hello', 'hi', 'hey', 'good', 'morning', 'afternoon', 'evening', 
                 'yes', 'yeah', 'yep', 'sure', 'okay', 'ok', 'calling', 'about',
-                'speaking', 'here', 'with', 'you', 'the', 'a', 'an', 'and'
+                'speaking', 'here', 'with', 'you', 'the', 'a', 'an', 'and',
+                'um', 'uh', 'well', 'so', 'like', 'just', 'saw', 'met', 'know', 'is', 'that',
+                'thank', 'thanks', 'no', 'nope', 'nah'
             }
-            # Only return if it's not in skip words and has reasonable length
-            if (name.lower() not in skip_words and 
+            # Check if any word in the name is in skip words
+            name_words = name.lower().split()
+            if (not any(word in skip_words for word in name_words) and 
                 len(name) >= 2 and len(name) <= 50 and 
-                not any(char.isdigit() for char in name)):
-                return name
+                not any(char.isdigit() for char in name) and
+                all(char.isalpha() or char in ['-', "'", ' '] for char in name)):
+                
+                # For multi-word names, return only the first word
+                if ' ' in name:
+                    first_name = name.split()[0]
+                    # Only return if first name is not a skip word
+                    if first_name.lower() not in skip_words:
+                        return first_name
+                else:
+                    return name
+    
+    # If no name found with regex patterns, try GPT as fallback
+    try:
+        from openai import OpenAI
+        import os
+        
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        prompt = f"""
+        Extract the person's name from this text. Return ONLY the name, nothing else.
+        If no clear name is found, return "None".
+        
+        Examples:
+        "um Sean" -> "Sean"
+        "I'm John" -> "John"
+        "My name is Sarah" -> "Sarah"
+        "Thank you" -> "None"
+        "Hello" -> "None"
+        
+        Text: "{text}"
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=10,
+            temperature=0
+        )
+        
+        name = response.choices[0].message.content.strip()
+        
+        # Validate the response
+        if name.lower() in ['none', 'no', 'n/a', '']:
+            return None
+            
+        # Basic validation - should be letters, hyphens, apostrophes, reasonable length
+        # Allow common punctuation like periods, commas, exclamation marks
+        if (name and len(name) >= 2 and len(name) <= 50 and 
+            all(char.isalpha() or char in ['-', "'", ' '] for char in name) and
+            not any(char.isdigit() for char in text) and
+            not any(char in ['@', '#', '$', '%', '&', '*', '+', '=', '<', '>', '[', ']', '{', '}', '(', ')', '|', '\\', '/', '`', '~', '^'] for char in text)):
+            return name.title()
+            
+    except Exception as e:
+        logger.debug(f"GPT name extraction failed: {e}")
     
     return None
 
