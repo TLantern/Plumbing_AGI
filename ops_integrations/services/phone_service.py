@@ -28,6 +28,18 @@ try:
     from core.job_booking import book_emergency_job, book_scheduled_job
     from adapters.external_services.google_calendar import CalendarAdapter
     from adapters.conversation_manager import ConversationManager
+    # Import missing functions from adapters.phone
+    from adapters.phone import (
+        _finalize_call_metrics,
+        pcm_to_wav_bytes,
+        is_transfer_request,
+        perform_dispatch_transfer,
+        clean_and_filter_transcription,
+        reset_unclear_attempts,
+        contains_emergency_keywords,
+        is_noise_or_unknown,
+        streaming_watchdog,
+    )
 except Exception:
     import sys as _sys
     import os as _os
@@ -43,6 +55,18 @@ except Exception:
     from core.job_booking import book_emergency_job, book_scheduled_job
     from adapters.external_services.google_calendar import CalendarAdapter
     from adapters.conversation_manager import ConversationManager
+    # Import missing functions from adapters.phone
+    from adapters.phone import (
+        _finalize_call_metrics,
+        pcm_to_wav_bytes,
+        is_transfer_request,
+        perform_dispatch_transfer,
+        clean_and_filter_transcription,
+        reset_unclear_attempts,
+        contains_emergency_keywords,
+        is_noise_or_unknown,
+        streaming_watchdog,
+    )
 from datetime import datetime, timedelta, timezone
 try:
     import webrtcvad  # type: ignore
@@ -1348,7 +1372,7 @@ async def voice_webhook(request: Request):
 
     # Watchdog: if no media arrives shortly, re-push TwiML to ensure streaming
     try:
-        asyncio.create_task(streaming_watchdog(call_sid))
+        asyncio.create_task((call_sid))
     except Exception as e:
         logger.debug(f"Failed to schedule streaming watchdog for {call_sid}: {e}")
 
@@ -4290,70 +4314,6 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         logger.info(f"Handled intent {intent} for CallSid={call_sid}")
         _mark_progress(call_sid, "intent_handled_final", f"completed intent handling for {job_type}")
         return twiml
-
-    # Otherwise, extract a fresh intent with parallel processing for speed
-    if FAST_RESPONSE_MODE:
-        # Run intent extraction and time parsing in parallel
-        intent_task = asyncio.create_task(extract_intent_from_text(call_sid, text))
-        time_task = asyncio.create_task(_parse_time_parallel(text))
-        intent, (explicit_time, explicit_emergency) = await asyncio.gather(intent_task, time_task)
-    else:
-        intent = await extract_intent_from_text(call_sid, text)
-        explicit_time = parse_human_datetime(text) or gpt_infer_datetime_phrase(text)
-        explicit_emergency = contains_emergency_keywords(text)
-    
-    # NEW: Mark progress if we successfully extracted intent
-    if intent and intent.get('job', {}).get('type'):
-        _mark_progress(call_sid, "intent_extracted", f"extracted job type: {intent.get('job', {}).get('type')}")
-    else:
-        _mark_no_progress(call_sid, "failed to extract meaningful intent")
-    
-    # Check if this is a plumbing issue and we haven't asked for problem details yet
-    job_type = intent.get('job', {}).get('type', '')
-    is_plumbing_issue = job_type and job_type != 'general_inquiry'
-    
-    # Debug logging to understand why problem details question isn't being asked
-    logger.info(f"🔍 DEBUG: Checking problem details condition for {call_sid}:")
-    logger.info(f"   - is_plumbing_issue: {is_plumbing_issue}")
-    logger.info(f"   - job_type: {job_type}")
-    logger.info(f"   - explicit_time: {explicit_time}")
-    logger.info(f"   - explicit_emergency: {explicit_emergency}")
-    logger.info(f"   - is_affirmative_response: {is_affirmative_response(text)}")
-    logger.info(f"   - problem_details_asked: {dialog.get('problem_details_asked')}")
-    logger.info(f"   - dialog state: {dialog}")
-    
-    if (is_plumbing_issue and 
-        not explicit_time and 
-        not explicit_emergency and 
-        not dialog.get('problem_details_asked')):
-        
-        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_problem_details', 'problem_details_asked': True}
-        logger.info(f"🔍 ASKING FOR PROBLEM DETAILS: Plumbing issue identified from {call_sid} - asking specifically how and when it started")
-        twiml = VoiceResponse()
-        await add_tts_or_say_to_twiml(
-            twiml,
-            call_sid,
-            f"Tell me more about your {_speakable(job_type)}, specifically how and when it started."
-        )
-        start = Start()
-        wss_url = _build_wss_url_for_resume(call_sid)
-        start.stream(url=wss_url, track="inbound_track")
-        twiml.append(start)
-        twiml.pause(length=3600)
-        await push_twiml_to_call(call_sid, twiml)
-        _mark_progress(call_sid, "problem_details_requested", f"asked for details about {job_type}")
-        return
-    
-    # Defer prompting/booking until caller provides explicit signals (date/time or emergency) or after at least 2 segments
-    if (segments_count < 2 and not explicit_time and not explicit_emergency and 
-        not is_affirmative_response(text)):
-        # Don't set any step yet - just continue listening
-        logger.info(f"Deferring prompt; continuing to listen for {call_sid} (segments={segments_count})")
-        _mark_no_progress(call_sid, f"deferring prompt - segments={segments_count}, no explicit signals")
-        return
-    twiml = await handle_intent(call_sid, intent)
-    await push_twiml_to_call(call_sid, twiml)
-    _mark_progress(call_sid, "intent_handled", f"processed intent: {intent.get('job', {}).get('type', 'unknown')}")
 
 def validate_and_enhance_extraction(args: dict, original_text: str, call_sid: str = None) -> dict:
     """Validate and enhance extracted data with additional processing"""
