@@ -107,7 +107,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = os.getenv("REMOTE_WHISPER_URL", "https://ee7689bd1c73.ngrok-free.app")  # Configurable via .env
+REMOTE_WHISPER_URL = os.getenv("REMOTE_WHISPER_URL")  # Configurable via .env
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"
@@ -174,6 +174,20 @@ tts_version_counter: dict[str, int] = {}
 consecutive_intent_failures: dict[str, int] = defaultdict(int)
 consecutive_overall_failures: dict[str, int] = defaultdict(int)
 consecutive_missing_fields_failures: dict[str, int] = defaultdict(int)
+
+# NEW: Speech gate cycle tracking for comprehensive handoff detection
+speech_gate_cycle_tracking: dict[str, dict] = defaultdict(lambda: {
+    'total_cycles': 0,                    # Total speech gate cycles in this call
+    'consecutive_no_progress': 0,         # Consecutive cycles with no progress
+    'last_progress_time': 0,              # Last time we made meaningful progress
+    'last_speech_gate_time': 0,           # Last time speech gate was activated
+    'last_processed_text': '',            # Last successfully processed text
+    'last_intent_extracted': None,        # Last successfully extracted intent
+    'last_dialog_step': '',               # Last dialog step
+    'call_start_time': 0,                 # When the call started
+    'max_cycles_without_progress': 3,     # Max cycles without progress before handoff
+    'max_call_duration_without_progress': 120,  # Max seconds without progress before handoff
+})
 
 # Live Ops metrics aggregation and websocket clients
 from collections import deque
@@ -1626,6 +1640,12 @@ FUNCTIONS = [get_function_definition()]
 
 async def process_audio(call_sid: str, audio: bytes):
     """Enhanced audio processing with Voice Activity Detection (VAD)"""
+    # Check if handoff has been requested - if so, stop processing
+    call_info = call_info_store.get(call_sid, {})
+    if call_info.get('handoff_requested', False):
+        logger.debug(f"🚫 Skipping audio processing for {call_sid} - handoff already requested")
+        return
+    
     vad_state = vad_states[call_sid]
     vad = vad_state['vad']
     current_time = time.time()
@@ -1840,6 +1860,12 @@ async def process_audio(call_sid: str, audio: bytes):
 
 async def process_speech_segment(call_sid: str, audio_data: bytearray):
     """Process a detected speech segment"""
+    # Check if handoff has been requested - if so, stop processing
+    call_info = call_info_store.get(call_sid, {})
+    if call_info.get('handoff_requested', False):
+        logger.info(f"🚫 Skipping speech processing for {call_sid} - handoff already requested")
+        return
+    
     # Check processing lock to prevent multiple simultaneous processing
     vad_state = vad_states.get(call_sid, {})
     if vad_state.get('processing_lock', False):
@@ -2032,6 +2058,8 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
         if is_transfer_request(normalized):
             logger.info(f"🟢 Transfer keyword detected for {call_sid}: '{text}' (avg_logprob={mean_lp})")
             await perform_dispatch_transfer(call_sid)
+            # Release processing lock since we're transferring
+            vad_state['processing_lock'] = False
             return
         
         short_garbage = {"bye", "hi", "uh", "um", "hmm", "huh"}
@@ -2106,6 +2134,12 @@ async def process_speech_segment(call_sid: str, audio_data: bytearray):
 
 async def response_to_user_speech(call_sid: str, text: str) -> None:
     """Handle user speech response after transcription is complete"""
+    # Check if handoff has been requested - if so, stop processing
+    call_info = call_info_store.get(call_sid, {})
+    if call_info.get('handoff_requested', False):
+        logger.info(f"🚫 Skipping speech response processing for {call_sid} - handoff already requested")
+        return
+    
     # Post-booking Q&A flow
     dialog = call_dialog_state.get(call_sid)
     if dialog and dialog.get('step') == 'post_booking_qa':
@@ -2182,6 +2216,10 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
                 call_info_store[call_sid] = st
                 # Clear dialog state
                 call_dialog_state.pop(call_sid, None)
+                # Clear audio buffers to prevent further processing
+                audio_buffers.pop(call_sid, None)
+                # Clear VAD state to prevent further processing
+                vad_states.pop(call_sid, None)
                 await push_twiml_to_call(call_sid, twiml)
                 return
             
@@ -2215,6 +2253,10 @@ async def response_to_user_speech(call_sid: str, text: str) -> None:
             call_info_store[call_sid] = st
             # Clear dialog state
             call_dialog_state.pop(call_sid, None)
+            # Clear audio buffers to prevent further processing
+            audio_buffers.pop(call_sid, None)
+            # Clear VAD state to prevent further processing
+            vad_states.pop(call_sid, None)
             await push_twiml_to_call(call_sid, twiml)
             logger.info(f"📞 User confirmed transfer for {call_sid} after unclear attempts")
             return
@@ -3172,11 +3214,25 @@ def _speakable(text: Optional[str]) -> str:
     return " ".join(text.replace("_", " ").split())
 
 def _format_slot(dt: datetime) -> str:
-    # Format: Month D at H:MM AM/PM (no year)
-    month = dt.strftime("%B")
-    day = str(dt.day)
-    time_part = dt.strftime("%I:%M %p").lstrip("0")
-    return f"{month} {day} at {time_part}"
+    # Format: Month D at H:MM AM/PM (no year) - more natural speech
+    now = datetime.now()
+    today = now.date()
+    tomorrow = (now + timedelta(days=1)).date()
+    target_date = dt.date()
+    
+    if target_date == today:
+        date_part = "today"
+    elif target_date == tomorrow:
+        date_part = "tomorrow"
+    else:
+        month = dt.strftime("%B")
+        day = str(dt.day)
+        date_part = f"{month} {day}"
+    
+    hour = dt.strftime("%I").lstrip("0")  # Remove leading zero from hour
+    minute = dt.strftime("%M")
+    ampm = dt.strftime("%p")
+    return f"{date_part} at {hour}:{minute} {ampm}"
 
 # Slot rules helpers
 
@@ -3474,6 +3530,10 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         call_info_store[call_sid] = st
         # Clear dialog state to avoid further automation
         call_dialog_state.pop(call_sid, None)
+        # Clear audio buffers to prevent further processing
+        audio_buffers.pop(call_sid, None)
+        # Clear VAD state to prevent further processing
+        vad_states.pop(call_sid, None)
         logger.info(f"🤝 Immediate transfer for {call_sid} due to handoff_needed=True (dispatcher {number})")
         return twiml
     
@@ -3555,6 +3615,10 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                 st["handoff_reason"] = f"too_many_attempts_{current_step}"
                 call_info_store[call_sid] = st
                 call_dialog_state.pop(call_sid, None)
+                # Clear audio buffers to prevent further processing
+                audio_buffers.pop(call_sid, None)
+                # Clear VAD state to prevent further processing
+                vad_states.pop(call_sid, None)
                 return twiml
             append_stream_and_pause(twiml)
             return twiml
@@ -3726,8 +3790,8 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                             f"Perfect! Please hold while our operator confirms your appointment for {_format_slot(suggested_time)}."
                         )
                         state['step'] = 'awaiting_operator_confirm'
+                        state['suggested_time'] = suggested_time
                         call_dialog_state[call_sid] = state
-                        logger.info(f"🔄 DEBUG: Advanced state to awaiting_operator_confirm for {call_sid}")
                         append_stream_and_pause(twiml)
                         return twiml
                     else:
@@ -3763,14 +3827,42 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
         # Confirmation step: user can confirm or change the suggested slot - STRICT YES/NO ONLY
         if state.get('step') == 'awaiting_time_confirm':
             if is_strict_affirmative_response(followup_text):
+                logger.info(f"✅ YES DETECTED: User confirmed appointment for {call_sid} with response: '{followup_text}'")
+                # Reset clarification attempts on successful confirmation
+                conversation_manager.reset_clarification_attempts(call_sid)
                 conversation_manager.reset_step_attempts(call_sid, 'awaiting_time_confirm')
-                # continue success path
+                # User said YES - proceed to operator
+                suggested_time = state.get('suggested_time')
+                if isinstance(suggested_time, datetime):
+                    try:
+                        await _send_booking_to_operator(call_sid, intent, suggested_time)
+                    except Exception as e:
+                        logger.debug(f"Failed to broadcast booking to operator: {e}")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "Perfect! You'll get an SMS confirmation. Thanks for choosing SafeHarbour!")
+                    twiml.hangup()
+                    state['step'] = 'awaiting_operator_confirm'
+                    call_dialog_state[call_sid] = state
+                    _mark_progress(call_sid, "appointment_confirmed", f"user confirmed appointment for {_format_slot(suggested_time)}")
+                    return twiml
             elif is_strict_negative_response(followup_text):
+                logger.info(f"❌ NO DETECTED: User declined appointment for {call_sid} with response: '{followup_text}'")
+                # Reset clarification attempts on clear negative response
+                conversation_manager.reset_clarification_attempts(call_sid)
                 conversation_manager.reset_step_attempts(call_sid, 'awaiting_time_confirm')
-                # continue negative path
+                # User said NO - go back to scheduling
+                await add_tts_or_say_to_twiml(twiml, call_sid, "No problem. What date and time works better?")
+                call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time'}
+                append_stream_and_pause(twiml)
+                _mark_progress(call_sid, "appointment_declined", "user declined appointment, asking for different time")
+                return twiml
             else:
+                # Ambiguous response - check clarification attempts before asking again
+                clarification_count = conversation_manager.increment_clarification_attempts(call_sid)
+                logger.info(f"❓ AMBIGUOUS RESPONSE: User response '{followup_text}' for {call_sid} was not clearly yes or no - clarification attempt #{clarification_count}")
+                # Also track per-step attempts for awaiting_time_confirm
                 step_attempts = conversation_manager.increment_step_attempts(call_sid, 'awaiting_time_confirm')
                 if conversation_manager.should_handoff_due_to_step_attempts(call_sid, 'awaiting_time_confirm'):
+                    logger.info(f"🤝 HANDOFF: Too many attempts ({step_attempts}) at step 'awaiting_time_confirm' for {call_sid} - transferring to human dispatch")
                     try:
                         await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble understanding your response. Let me connect you with our dispatch team who can help you schedule your appointment.")
                     except Exception:
@@ -3782,8 +3874,31 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     st["handoff_reason"] = "too_many_attempts_awaiting_time_confirm"
                     call_info_store[call_sid] = st
                     call_dialog_state.pop(call_sid, None)
+                    # Clear audio buffers to prevent further processing
+                    audio_buffers.pop(call_sid, None)
+                    # Clear VAD state to prevent further processing
+                    vad_states.pop(call_sid, None)
                     return twiml
-                # continue existing clarification flow
+                
+                # If we've asked for clarification too many times, transfer to human dispatch
+                if conversation_manager.should_handoff_due_to_clarification_attempts(call_sid):
+                    logger.info(f"🤝 HANDOFF: Too many clarification attempts ({clarification_count}) for {call_sid} - transferring to human dispatch")
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble understanding your response. Let me connect you with our dispatch team who can help you schedule your appointment.")
+                    # Reset attempts and transition to operator handoff
+                    conversation_manager.reset_clarification_attempts(call_sid)
+                    state['step'] = 'awaiting_operator_confirm'
+                    call_dialog_state[call_sid] = state
+                    append_stream_and_pause(twiml)
+                    return twiml
+                else:
+                    await add_tts_or_say_to_twiml(twiml, call_sid, "I'm having trouble understanding your response. Let me connect you with our dispatch team who can help you schedule your appointment.")
+                    # Reset attempts and transition to operator handoff
+                    conversation_manager.reset_step_attempts(call_sid, 'awaiting_operator_confirm')
+                    state['step'] = 'awaiting_operator_confirm'
+                    call_dialog_state[call_sid] = state
+                    append_stream_and_pause(twiml)
+                    return twiml
+            
             # If user provided a new date/time at confirmation step, re-parse and re-suggest
             newly_parsed = parse_human_datetime(followup_text)
             if newly_parsed:
@@ -3804,7 +3919,7 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                     await add_tts_or_say_to_twiml(twiml, call_sid, f"I can schedule you for {_format_slot(newly_parsed)}. Do you want this time? Please say YES or NO.")
                     call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': newly_parsed}
                 else:
-                    # Suggest next available 2h window and send location link
+                    # Suggest next available 2h window
                     next_available = newly_parsed + timedelta(hours=2)
                     if getattr(calendar_adapter, 'enabled', False):
                         for i in range(1, 8):
@@ -3814,17 +3929,8 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
                             if not slot_events:
                                 next_available = slot_start
                                 break
-                    # try:
-                    #     ok = await _send_magiclink_sms(call_sid)
-                    # except Exception:
-                    #     ok = False
-                    ok = True  # Skip SMS for now, just wait for "done"
-                    if ok:
-                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO.")
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
-                    else:
-                        await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO.")
-                        call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
+                    await add_tts_or_say_to_twiml(twiml, call_sid, f"That time looks busy. The next available is {_format_slot(next_available)}. Do you want this time? Please say YES or NO.")
+                    call_dialog_state[call_sid] = {'intent': intent, 'step': 'awaiting_time_confirm', 'suggested_time': next_available}
                 append_stream_and_pause(twiml)
                 return twiml
         # Path choice handling first
@@ -3907,6 +4013,10 @@ async def handle_intent(call_sid: str, intent: dict, followup_text: str = None):
             st["handoff_reason"] = "too_many_attempts_awaiting_time"
             call_info_store[call_sid] = st
             call_dialog_state.pop(call_sid, None)
+            # Clear audio buffers to prevent further processing
+            audio_buffers.pop(call_sid, None)
+            # Clear VAD state to prevent further processing
+            vad_states.pop(call_sid, None)
             return twiml
         append_stream_and_pause(twiml)
         return twiml
@@ -4104,6 +4214,12 @@ async def perform_dispatch_transfer(call_sid: str) -> None:
         st["handoff_requested"] = True
         st["handoff_reason"] = "user_requested_transfer"
         call_info_store[call_sid] = st
+        # Clear dialog state to prevent further processing
+        call_dialog_state.pop(call_sid, None)
+        # Clear audio buffers to prevent further processing
+        audio_buffers.pop(call_sid, None)
+        # Clear VAD state to prevent further processing
+        vad_states.pop(call_sid, None)
         await push_twiml_to_call(call_sid, twiml)
         logger.info(f"📞 Initiated transfer for {call_sid} to dispatcher {number}")
     except Exception as e:
@@ -4164,6 +4280,10 @@ async def handle_followup_or_handoff(call_sid: str, followup_text: str, twiml: V
             call_info_store[call_sid] = st
             # Clear dialog state
             call_dialog_state.pop(call_sid, None)
+            # Clear audio buffers to prevent further processing
+            audio_buffers.pop(call_sid, None)
+            # Clear VAD state to prevent further processing
+            vad_states.pop(call_sid, None)
             logger.info(f"📞 User confirmed transfer for {call_sid} after unclear attempts")
             return twiml
         elif is_negative_response(followup_text):
@@ -4918,3 +5038,21 @@ def remove_repeated_phrases(text: str) -> str:
     return result
 
 # Now update the existing transcription processing code
+
+def _mark_progress(call_sid: str, progress_type: str, details: str = ""):
+    """Mark that meaningful progress has been made in the conversation"""
+    try:
+        cycle_tracking = speech_gate_cycle_tracking.get(call_sid, {})
+        if not cycle_tracking:
+            logger.info(f"🔍 No cycle tracking found for progress marking on {call_sid}")
+            return
+        
+        current_time = time.time()
+        cycle_tracking['last_progress_time'] = current_time
+        cycle_tracking['consecutive_no_progress'] = 0  # Reset counter
+        
+        logger.info(f"✅ PROGRESS MARKED for {call_sid}: {progress_type} - {details}")
+        logger.debug(f"   📊 Progress stats: consecutive_no_progress reset to 0, last_progress_time={current_time}")
+        
+    except Exception as e:
+        logger.error(f"Error marking progress for {call_sid}: {e}")

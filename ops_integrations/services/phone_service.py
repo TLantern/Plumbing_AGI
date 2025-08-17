@@ -147,7 +147,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Transcription configuration
 USE_LOCAL_WHISPER = False    # Set to False to use remote Whisper service
 USE_REMOTE_WHISPER = True  # Set to True to use remote Whisper service
-REMOTE_WHISPER_URL = os.getenv("REMOTE_WHISPER_URL", "https://ee7689bd1c73.ngrok-free.app")  # Configurable via .env
+REMOTE_WHISPER_URL = os.getenv("REMOTE_WHISPER_URL")  # Configurable via .env
 
 # Fallback to OpenAI Whisper if local not available
 TRANSCRIPTION_MODEL = "whisper-1"  # Note: Remote service uses large-v3 (Whisper 3) for better performance
