@@ -123,7 +123,7 @@ MIN_SPEECH_DURATION_SEC = 0.5  # Longer = filter out more noise, better quality
 CHUNK_DURATION_SEC = 4.0  # Regular chunk duration for normal conversations
 PROBLEM_DETAILS_CHUNK_DURATION_SEC = 15.0  # Extended chunk duration specifically for problem details phase
 PREROLL_IGNORE_SEC = 0.1  # Shorter = start listening sooner
-MIN_START_RMS = 85  # Lower = more sensitive to quiet speech
+MIN_START_RMS = 90  # Lower = more sensitive to quiet speech
 FAST_RESPONSE_MODE = False  # Disabled for better quality over speed
 
 # Audio format defaults for Twilio Media Streams (mu-law 8k)
