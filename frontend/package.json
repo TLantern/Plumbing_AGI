@@ -2,10 +2,14 @@
   "name": "live-ops-dashboard",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "18.x",
+    "npm": "9.x"
+  },
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p 3000",
+    "start": "next start -p $PORT",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
   },
   "dependencies": {
