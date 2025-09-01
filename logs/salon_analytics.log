@@ -1,0 +1,428 @@
+2025-08-31 22:43:35,574 - voice-intent - INFO - env_loaded
+2025-08-31 22:43:35,588 - voice-intent - INFO - env_loaded
+2025-08-31 22:43:35,590 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-08-31 22:43:51,303 - voice-intent - INFO - env_loaded
+2025-08-31 22:43:51,318 - voice-intent - INFO - env_loaded
+2025-08-31 22:43:51,320 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-08-31 22:44:10,479 - voice-intent - INFO - env_loaded
+2025-08-31 22:44:10,492 - voice-intent - INFO - env_loaded
+2025-08-31 22:44:10,494 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-08-31 23:21:58,300 - voice-intent - INFO - env_loaded
+2025-08-31 23:21:58,314 - voice-intent - INFO - env_loaded
+2025-08-31 23:21:58,317 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-08-31 23:21:58,738 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-08-31 23:21:58,856 - root - INFO - Salon Analytics Service started
+2025-08-31 23:40:19,938 - root - INFO - Salon Analytics Service stopped
+2025-08-31 23:40:31,782 - voice-intent - INFO - env_loaded
+2025-08-31 23:40:31,798 - voice-intent - INFO - env_loaded
+2025-08-31 23:40:31,801 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-08-31 23:40:32,431 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 00:04:41,677 - voice-intent - INFO - env_loaded
+2025-09-01 00:04:41,692 - voice-intent - INFO - env_loaded
+2025-09-01 00:04:41,694 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 00:04:42,076 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 00:04:42,134 - root - INFO - Salon Analytics Service started
+2025-09-01 00:23:13,190 - voice-intent - INFO - env_loaded
+2025-09-01 00:23:13,207 - voice-intent - INFO - env_loaded
+2025-09-01 00:23:13,211 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 00:23:13,521 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 00:24:08,500 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:24:09,031 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:28:35,263 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:28:35,901 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:31:36,367 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:31:36,957 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:34:37,465 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:34:38,010 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:37:38,678 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:37:39,323 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:40:39,750 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:40:40,337 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:43:41,086 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:43:41,467 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:46:42,234 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:46:42,606 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:49:43,076 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:49:43,568 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:52:44,045 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:52:44,823 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:55:45,042 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:55:45,710 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 00:58:46,209 - watchfiles.main - INFO - 1 change detected
+2025-09-01 00:58:46,768 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 01:55:28,074 - watchfiles.main - INFO - 1 change detected
+2025-09-01 01:55:29,329 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:16:31,191 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:16:32,015 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:17:51,587 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:17:55,263 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:18:00,922 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:18:08,155 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:18:13,801 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:18:24,749 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:18:45,633 - voice-intent - INFO - env_loaded
+2025-09-01 10:18:45,668 - voice-intent - INFO - env_loaded
+2025-09-01 10:18:45,673 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 10:18:46,402 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 10:19:09,825 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:19:10,216 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:19:10,907 - watchfiles.main - INFO - 4 changes detected
+2025-09-01 10:19:11,378 - watchfiles.main - INFO - 27 changes detected
+2025-09-01 10:19:11,846 - watchfiles.main - INFO - 12 changes detected
+2025-09-01 10:19:12,210 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:19:12,570 - watchfiles.main - INFO - 12 changes detected
+2025-09-01 10:19:13,682 - watchfiles.main - INFO - 6 changes detected
+2025-09-01 10:19:14,048 - watchfiles.main - INFO - 19 changes detected
+2025-09-01 10:19:15,919 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:19:38,622 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:19:39,257 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:20:10,017 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:20:10,696 - watchfiles.main - INFO - 14 changes detected
+2025-09-01 10:20:11,127 - watchfiles.main - INFO - 11 changes detected
+2025-09-01 10:20:12,328 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:20:12,686 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:20:13,112 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:20:22,591 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:20:23,074 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:20:23,435 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:20:24,546 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:20:28,805 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:20:29,217 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:20:39,883 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:20:40,264 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:20:45,949 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:20:46,311 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:20:47,386 - watchfiles.main - INFO - 4 changes detected
+2025-09-01 10:20:47,751 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:20:56,177 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:20:56,546 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:20:57,448 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:21:02,429 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:21:02,794 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:21:08,875 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:21:09,527 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:21:09,901 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:21:10,852 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:21:11,209 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:21:16,851 - watchfiles.main - INFO - 18 changes detected
+2025-09-01 10:21:22,234 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:21:22,598 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:21:27,623 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:21:27,986 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:21:36,367 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:21:36,747 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:21:37,650 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:21:38,013 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 10:21:43,903 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:21:47,033 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:21:47,403 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:21:47,774 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:21:48,662 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 10:21:49,697 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:21:52,138 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:21:52,500 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:21:52,869 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:21:57,386 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:21:57,798 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:21:58,163 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:22:00,780 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:22:09,793 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:22:10,332 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:22:10,690 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:22:11,374 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:22:11,738 - watchfiles.main - INFO - 20 changes detected
+2025-09-01 10:22:13,479 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:22:23,983 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:22:24,908 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:22:25,279 - watchfiles.main - INFO - 9 changes detected
+2025-09-01 10:22:26,410 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:22:27,962 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:22:39,423 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:22:40,112 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:23:25,145 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:25:08,869 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:25:09,340 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:25:09,697 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:25:11,892 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:25:13,382 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:25:40,297 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:25:41,106 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:26:09,686 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:26:49,576 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:26:49,947 - watchfiles.main - INFO - 9 changes detected
+2025-09-01 10:26:51,814 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:27:02,120 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:02,481 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:27:02,844 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:27:03,676 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:27:04,100 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:27:04,618 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:27:07,692 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:08,050 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:27:08,477 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:27:09,503 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:27:17,309 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:18,058 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:27:18,430 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:27:19,110 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:27:19,479 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 10:27:21,052 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:27:30,049 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:30,415 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:27:30,778 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:27:31,467 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:27:33,074 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:27:41,060 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:41,422 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:27:47,354 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:48,592 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:27:48,969 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:27:49,705 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:27:50,069 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 10:27:50,430 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:27:53,813 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:54,190 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:54,548 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:56,270 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:27:56,637 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:28:00,553 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:28:02,318 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:28:02,686 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:28:05,499 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:28:12,541 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:28:12,908 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:28:15,912 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:28:24,700 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:28:25,078 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:28:25,445 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:28:26,184 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 10:28:27,899 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:28:32,232 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:28:32,605 - watchfiles.main - INFO - 15 changes detected
+2025-09-01 10:28:33,070 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:28:36,915 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:28:37,972 - watchfiles.main - INFO - 4 changes detected
+2025-09-01 10:28:38,339 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:28:40,590 - watchfiles.main - INFO - 12 changes detected
+2025-09-01 10:28:40,967 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:28:44,382 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:28:44,856 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:28:45,220 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:28:46,067 - watchfiles.main - INFO - 4 changes detected
+2025-09-01 10:28:46,438 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:28:47,131 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:28:47,657 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:28:48,767 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:29:16,068 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:29:17,299 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:29:17,669 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:29:18,355 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:29:18,725 - watchfiles.main - INFO - 32 changes detected
+2025-09-01 10:29:23,112 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:30:22,264 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:30:23,518 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:30:23,902 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:30:24,687 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:30:26,414 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:30:26,784 - watchfiles.main - INFO - 9 changes detected
+2025-09-01 10:31:26,877 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:31:49,290 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:31:49,650 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:32:23,215 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:34:49,937 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:34:50,637 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:35:24,388 - voice-intent - INFO - env_loaded
+2025-09-01 10:35:24,412 - voice-intent - INFO - env_loaded
+2025-09-01 10:35:24,421 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 10:35:25,197 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 10:35:28,952 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 10:35:45,710 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:36:20,324 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:36:20,690 - watchfiles.main - INFO - 16 changes detected
+2025-09-01 10:36:29,088 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:36:29,452 - watchfiles.main - INFO - 25 changes detected
+2025-09-01 10:37:48,767 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:37:49,530 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:37:58,752 - watchfiles.main - INFO - 9 changes detected
+2025-09-01 10:38:24,723 - voice-intent - INFO - env_loaded
+2025-09-01 10:38:24,741 - voice-intent - INFO - env_loaded
+2025-09-01 10:38:24,748 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 10:38:24,980 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 10:38:26,787 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 10:38:27,151 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:38:27,989 - watchfiles.main - INFO - 16 changes detected
+2025-09-01 10:38:28,355 - watchfiles.main - INFO - 34 changes detected
+2025-09-01 10:38:28,719 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:38:32,782 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:39:28,362 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:39:28,729 - watchfiles.main - INFO - 19 changes detected
+2025-09-01 10:40:46,927 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:40:47,527 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:41:12,801 - voice-intent - INFO - env_loaded
+2025-09-01 10:41:12,818 - voice-intent - INFO - env_loaded
+2025-09-01 10:41:12,820 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 10:41:13,261 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 10:43:54,327 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:43:55,016 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:46:55,541 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:46:56,100 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:49:32,749 - watchfiles.main - INFO - 9 changes detected
+2025-09-01 10:49:33,903 - watchfiles.main - INFO - 16 changes detected
+2025-09-01 10:49:39,171 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:49:42,977 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:49:49,696 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:49:56,133 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:49:56,682 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:49:57,097 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:50:01,567 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:50:06,452 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:50:12,372 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:50:21,672 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:50:27,011 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:50:33,918 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:50:39,830 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:50:47,348 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:50:52,510 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:51:20,977 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:51:26,159 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:52:57,385 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:52:57,855 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:53:27,338 - voice-intent - INFO - env_loaded
+2025-09-01 10:53:27,366 - voice-intent - INFO - env_loaded
+2025-09-01 10:53:27,372 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 10:53:28,226 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 10:54:26,688 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:55:22,051 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:56:22,651 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:56:23,441 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:56:35,326 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:56:57,166 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:57:02,857 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:57:03,541 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:57:03,906 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:57:05,246 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:57:12,700 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:57:21,317 - watchfiles.main - INFO - 6 changes detected
+2025-09-01 10:57:28,657 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:57:33,506 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:57:34,882 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:57:45,626 - watchfiles.main - INFO - 6 changes detected
+2025-09-01 10:57:57,466 - watchfiles.main - INFO - 4 changes detected
+2025-09-01 10:57:58,012 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 10:58:20,185 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:58:20,769 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:58:21,209 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:58:21,573 - watchfiles.main - INFO - 14 changes detected
+2025-09-01 10:58:22,588 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:58:26,225 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:58:44,875 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:58:45,400 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:58:46,477 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:59:02,147 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:59:02,675 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:59:03,050 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:59:03,673 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 10:59:05,397 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:59:10,329 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:59:14,668 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:59:15,037 - watchfiles.main - INFO - 9 changes detected
+2025-09-01 10:59:17,838 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 10:59:18,683 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 10:59:19,076 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 10:59:19,442 - watchfiles.main - INFO - 9 changes detected
+2025-09-01 10:59:20,239 - watchfiles.main - INFO - 1 change detected
+2025-09-01 10:59:20,612 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 10:59:20,992 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 10:59:21,512 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 10:59:29,740 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:00:03,737 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:00:04,966 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:00:29,909 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 11:00:42,920 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:00:49,276 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:00:49,640 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 11:00:50,493 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:00:55,288 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:01:05,050 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:01:09,957 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:01:20,909 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:01:25,508 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:01:28,692 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:01:32,693 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:01:36,875 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:01:40,907 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:01:43,811 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:01:47,786 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:01:57,133 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:02:02,072 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:02:07,924 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:02:08,510 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:02:14,792 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:02:24,179 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 11:02:28,207 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:03:05,236 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:03:05,869 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:08:53,304 - voice-intent - INFO - env_loaded
+2025-09-01 11:08:53,330 - voice-intent - INFO - env_loaded
+2025-09-01 11:08:53,334 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 11:08:53,838 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 11:08:53,840 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM
+2025-09-01 11:08:54,617 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 11:08:54,976 - watchfiles.main - INFO - 16 changes detected
+2025-09-01 11:08:55,823 - watchfiles.main - INFO - 25 changes detected
+2025-09-01 11:09:04,231 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:09:49,088 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:09:49,834 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:09:50,308 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:11:28,449 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:11:29,017 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:11:35,525 - watchfiles.main - INFO - 5 changes detected
+2025-09-01 11:11:37,329 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:11:42,192 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:35:11,118 - voice-intent - INFO - env_loaded
+2025-09-01 11:35:11,137 - voice-intent - INFO - env_loaded
+2025-09-01 11:35:11,139 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-01 11:35:11,659 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-01 11:35:11,661 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM
+2025-09-01 11:35:36,540 - watchfiles.main - INFO - 17 changes detected
+2025-09-01 11:35:36,905 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 11:35:37,636 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 11:35:37,998 - watchfiles.main - INFO - 16 changes detected
+2025-09-01 11:35:39,012 - watchfiles.main - INFO - 6 changes detected
+2025-09-01 11:35:39,377 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:35:40,219 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 11:35:45,251 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:35:59,870 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:36:00,784 - watchfiles.main - INFO - 14 changes detected
+2025-09-01 11:36:01,152 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 11:36:01,838 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 11:36:16,884 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:36:17,883 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 11:36:18,286 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 11:36:18,704 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:36:19,071 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 11:36:19,431 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 11:36:37,862 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:36:38,228 - watchfiles.main - INFO - 13 changes detected
+2025-09-01 11:36:38,595 - watchfiles.main - INFO - 2 changes detected
+2025-09-01 11:36:40,046 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:36:51,093 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:36:51,530 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 11:36:52,530 - watchfiles.main - INFO - 7 changes detected
+2025-09-01 11:36:53,022 - watchfiles.main - INFO - 16 changes detected
+2025-09-01 11:36:54,522 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:37:39,707 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:37:40,401 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:40:40,843 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:40:41,479 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 11:43:41,890 - watchfiles.main - INFO - 1 change detected
+2025-09-01 11:43:42,460 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 14:33:15,332 - watchfiles.main - INFO - 1 change detected
+2025-09-01 14:33:17,558 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 14:54:49,348 - watchfiles.main - INFO - 1 change detected
+2025-09-01 14:54:49,749 - watchfiles.main - INFO - 3 changes detected
+2025-09-01 14:55:00,643 - watchfiles.main - INFO - 1 change detected
+2025-09-01 14:55:01,548 - watchfiles.main - INFO - 8 changes detected
+2025-09-01 14:55:01,933 - watchfiles.main - INFO - 9 changes detected
+2025-09-01 14:55:02,931 - watchfiles.main - INFO - 10 changes detected
+2025-09-01 14:55:20,905 - watchfiles.main - INFO - 3 changes detected

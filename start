@@ -1,3 +1,8 @@
+####Plumbing Script#####
 /Users/tenbandz/Code/Plumbing_AGI/scripts/dev.sh
-
 .scripts/dev.sh
+
+####Salon Script####
+python3 scripts/start_salon_analytics.py
+python3 scripts/start_salon_phone.py
+./scripts/salon_dev.sh

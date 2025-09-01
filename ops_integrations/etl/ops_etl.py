@@ -7,7 +7,8 @@ load_dotenv()
 
 from ops_integrations.adapters.external_services.google_calendar import CalendarAdapter
 from ops_integrations.adapters.integrations.crm import CRMAdapter
-from ops_integrations.adapters.integrations.inventory import InventoryAdapter
+# Inventory adapter removed - not implemented
+# from ops_integrations.adapters.integrations.inventory import InventoryAdapter
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,7 +29,8 @@ class OpsETLSync:
             self.crm = None
             self.crm_available = False
         
-        self.inventory = InventoryAdapter()  # Currently disabled
+        # self.inventory = InventoryAdapter()  # Currently disabled - removed
+        self.inventory = None
         
         # Initialize Akaunting adapter only if credentials are available
         try:

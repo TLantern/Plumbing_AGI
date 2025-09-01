@@ -1,0 +1,6 @@
+2025-09-01 11:10:15,464 - CALL_EVENT - INFO - [INITIATED] Call CA69c5eb1cb80bd189c3e626130db7ee32 - {'from': '+19404656984', 'to': '+15876009008', 'notes': 'Incoming call received'}
+2025-09-01 11:10:17,102 - CALL_EVENT - INFO - [ROUTING] Call CA69c5eb1cb80bd189c3e626130db7ee32 - {'to': '+14693096560', 'notes': 'Routing call to dispatcher: +14693096560'}
+2025-09-01 11:11:04,015 - CALL_EVENT - WARNING - [NO_ANSWER] Call CA69c5eb1cb80bd189c3e626130db7ee32 - {'notes': 'Dispatcher did not answer call', 'error_code': 'no-answer'}
+2025-09-01 11:35:15,640 - CALL_EVENT - INFO - [INITIATED] Call CA7b3659b0511056015b11bd73a267ee0e - {'from': '+19404656984', 'to': '+15876009008', 'notes': 'Incoming call received'}
+2025-09-01 11:35:16,716 - CALL_EVENT - INFO - [ROUTING] Call CA7b3659b0511056015b11bd73a267ee0e - {'to': '+14693096560', 'notes': 'Routing call to dispatcher: +14693096560'}
+2025-09-01 11:36:02,446 - CALL_EVENT - WARNING - [NO_ANSWER] Call CA7b3659b0511056015b11bd73a267ee0e - {'notes': 'Dispatcher did not answer call', 'error_code': 'no-answer'}

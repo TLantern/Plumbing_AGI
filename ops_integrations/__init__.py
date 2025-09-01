@@ -38,9 +38,7 @@ from .adapters.external_services import (
 # Integration adapters
 from .adapters.integrations import (
     crm,
-    akaunting,
-    inventory,
-    calender
+    akaunting
 )
 
 # ETL and utilities
@@ -77,8 +75,6 @@ __all__ = [
     # Integrations
     'crm',
     'akaunting',
-    'inventory',
-    'calender',
     
     # ETL
     'ops_etl'

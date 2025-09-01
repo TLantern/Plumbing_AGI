@@ -20,7 +20,7 @@ from . import tts_manager
 from .external_services import twilio_webhook, google_calendar, sheets, sms
 
 # Integrations
-from .integrations import crm, akaunting, inventory, calender
+from .integrations import crm, akaunting
 
 __all__ = [
     # Core adapters
@@ -38,7 +38,5 @@ __all__ = [
     
     # Integrations
     'crm',
-    'akaunting',
-    'inventory',
-    'calender'
+    'akaunting'
 ] 

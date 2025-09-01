@@ -1225,6 +1225,11 @@ async def serve_tts(call_sid: str):
 async def root():
     return {"message": "SafeHarbour Plumbing Voice Service", "status": "running"}
 
+# Handle POST requests to root path (same as voice webhook)
+@app.post("/")
+async def root_post(request: Request):
+    return await voice_webhook(request)
+
 # Serve last TwiML as a fallback via URL fetch (Twilio update url=...)
 @app.get("/twiml/{call_sid}")
 async def serve_twiml(call_sid: str):

@@ -1,0 +1,61 @@
+{
+    "services": {
+      "Weaves & Extensions": [
+        { "name": "Weave On (extensions not included)", "price": 150 },
+        { "name": "Weave (no extensions, Children under 8)", "price": 50 },
+        { "name": "Girl's Weave with Extensions (0–8 yrs)", "price": 70 },
+        { "name": "Girl's Weave with Extensions (full, 0–8 yrs / 8–10 yrs, +CAD 10 extensions)", "price": 100 }
+      ],
+      "Braids": [
+        { "name": "Small Twist (starts from, +CAD 50 longer length, +CAD 20 extensions)", "price": 250 },
+        { "name": "Small Medium Braids (back length)", "price": 200 },
+        { "name": "Small Knotless Braids (back length, +CAD 50 extra length)", "price": 250 },
+        { "name": "Medium Knotless Braids (back length, +CAD 50 extra length)", "price": 150 },
+        { "name": "Men's Cornrow (+CAD 20 extensions)", "price": 100 },
+        { "name": "Girl's Kinky (0–8 yrs)", "price": 120 },
+        { "name": "Girl's Cornrows without Extension", "price": 50 },
+        { "name": "Girls Braids for Kids (0–8 yrs)", "price": 120 },
+        { "name": "Feed-ins / Ghana Weave", "price": 150 }
+      ],
+      "Locs": [
+        { "name": "Sister Loc / Micro Loc", "price": 400 },
+        { "name": "Relocking", "price": 120 },
+        { "name": "Reloc Micro Loc (with extension)", "price": 150 },
+        { "name": "Men Starter Loc & Wash", "price": 500 },
+        { "name": "Loc Take Down", "price": 300 }
+      ],
+      "Twists": [
+        { "name": "Regular Twists", "price": 200 },
+        { "name": "Natural Hair Twist (Adult)", "price": 150 },
+        { "name": "Natural Hair Twist (0–8 yrs)", "price": 100 },
+        { "name": "Mini Twist", "price": 300 },
+        { "name": "Micro Twist", "price": 300 },
+        { "name": "Micro Kinky", "price": 200 },
+        { "name": "Kinky Twists (+CAD 20 extensions)", "price": 200 },
+        { "name": "Boho Twist", "price": 250 },
+        { "name": "Boho Bob", "price": 200 },
+        { "name": "Bob Boho (0–8 yrs)", "price": 150 }
+      ],
+      "Crochet": [
+        { "name": "Regular Crochet", "price": 80 },
+        { "name": "Individual Crochet Style", "price": 100 },
+        { "name": "Girl's Crochet (0–8 yrs)", "price": 70 }
+      ],
+      "Boho Styles": [
+        { "name": "Sade Adu Boho", "price": 200 },
+        { "name": "Sade Adu", "price": 150 },
+        { "name": "Boho (extensions not included, starts CAD 200–250)", "price": 200 }
+      ],
+      "Other Services": [
+        { "name": "French Curl (extensions not included)", "price": 200 },
+        { "name": "Faux Loc", "price": 150 },
+        { "name": "Faux Loc Take Down", "price": 100 },
+        { "name": "Pick & Drop (extensions not included)", "price": 200 },
+        { "name": "Braids Take Down (extensions not included)", "price": 50 },
+        { "name": "Beading Service", "price": 20 },
+        { "name": "Additional Service (Wash & Treatment)", "price": 50 },
+        { "name": "Add-on Service (Extra Length)", "price": 50 }
+      ]
+    },
+    "currency": "CAD"
+  }

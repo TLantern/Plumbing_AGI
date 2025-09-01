@@ -52,20 +52,19 @@ class GoogleSheetsCRM:
     def _headers(self) -> List[str]:
         return [
             "Timestamp",
-            "Call SID",
+            "Call SID", 
             "Customer Name",
-            "Phone",
-            "Service Type",
-            "Appointment Time ISO",
-            "Address",
+            "Phone Number",
+            "Call Status",
+            "Call Duration (sec)",
+            "After Hours",
+            "Service Requested",
+            "Appointment Date",
+            "Recording URL",
             "Notes",
-            "Operator Note",
             "Source",
-            "City",
-            "State",
-            "Zip",
             "Direction",
-            "Caller Name",
+            "Error Code"
         ]
 
     def _record_to_row(self, rec: Dict[str, Any]) -> List[str]:
@@ -74,21 +73,53 @@ class GoogleSheetsCRM:
             rec.get("call_sid", ""),
             rec.get("customer_name", ""),
             rec.get("phone", ""),
-            rec.get("service_type", ""),
-            rec.get("appointment_time_iso", ""),
-            rec.get("address", ""),
+            rec.get("call_status", ""),
+            rec.get("call_duration", ""),
+            rec.get("after_hours", ""),
+            rec.get("service_requested", ""),
+            rec.get("appointment_date", ""),
+            rec.get("recording_url", ""),
             rec.get("notes", ""),
-            rec.get("operator_note", ""),
-            rec.get("source", "operator_confirmed"),
-            rec.get("city", ""),
-            rec.get("state", ""),
-            rec.get("zip", ""),
-            rec.get("direction", ""),
-            rec.get("caller_name", ""),
+            rec.get("source", "phone_system"),
+            rec.get("direction", "inbound"),
+            rec.get("error_code", "")
         ]
+
+    def _ensure_headers(self) -> bool:  # pragma: no cover
+        """Ensure headers are present in the sheet"""
+        try:
+            # Check if headers exist by reading the first row
+            result = self._service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{self.tab_name}!A1:M1"
+            ).execute()
+            
+            values = result.get('values', [])
+            if not values or not values[0]:
+                # No headers found, add them
+                headers = self._headers()
+                body = {"values": [headers]}
+                self._service.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"{self.tab_name}!A1",
+                    valueInputOption="USER_ENTERED",
+                    body=body
+                ).execute()
+                logging.info(f"Added headers to {self.tab_name} sheet")
+                return True
+            else:
+                # Headers already exist
+                return True
+        except Exception as e:
+            logging.error(f"Failed to ensure headers: {e}")
+            return False
 
     def _append_to_sheets(self, row_values: List[str]) -> bool:  # pragma: no cover
         try:
+            # Ensure headers are present first
+            if not self._ensure_headers():
+                return False
+                
             sheet_range = f"{self.tab_name}!A:Z"
             body = {"values": [row_values]}
             self._service.spreadsheets().values().append(
@@ -121,19 +152,18 @@ class GoogleSheetsCRM:
         row_dict = {
             "timestamp": booking.get("timestamp") or datetime.utcnow().isoformat() + "Z",
             "call_sid": booking.get("call_sid"),
-            "customer_name": booking.get("customer_name") or booking.get("name") or "Customer",
+            "customer_name": booking.get("customer_name") or booking.get("name") or "Unknown",
             "phone": booking.get("phone") or "",
-            "service_type": booking.get("service_type") or booking.get("service") or "",
-            "appointment_time_iso": booking.get("appointment_time_iso") or "",
-            "address": booking.get("address") or "",
+            "call_status": booking.get("call_status") or "",
+            "call_duration": booking.get("call_duration") or "",
+            "after_hours": booking.get("after_hours") or "",
+            "service_requested": booking.get("service_requested") or booking.get("service_type") or "",
+            "appointment_date": booking.get("appointment_date") or "",
+            "recording_url": booking.get("recording_url") or "",
             "notes": booking.get("notes") or "",
-            "operator_note": booking.get("operator_note") or "",
-            "source": booking.get("source") or "operator_confirmed",
-            "city": booking.get("city") or "",
-            "state": booking.get("state") or "",
-            "zip": booking.get("zip") or "",
-            "direction": booking.get("direction") or "",
-            "caller_name": booking.get("caller_name") or "",
+            "source": booking.get("source") or "phone_system",
+            "direction": booking.get("direction") or "inbound",
+            "error_code": booking.get("error_code") or ""
         }
 
         if self.enabled and self._service is not None:

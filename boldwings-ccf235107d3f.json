@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "boldwings",
+  "private_key_id": "ccf235107d3f4ded7cda488eb7013beb4d668f1d",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC+iYiITV2ds6X7\nD7FDLQHQ+1hNehpujkH75JbZ1+WSfDNBQ7DSTiMqpqg9lMScGfpJV6PLxfQKJxfL\nJ2i1XmCxV7HAZKWUp9rVLoUg5B/1Rk+F9jUSu0kVEmBZn9SoRoXdmCTYKeLyhHxc\nC9l1i5n53Iy4YQJt7cnAYsLGkF6tfmw4oedkFWpBoXWNvyfG3NOGOB4KKvl3Rq/R\nDpftT188FAErZ0UUXX5uphWfxsjhqa2WRBFgWwxe1pm+a4tg9by0ci3q6KC2D0sY\npfbD7VC1+qnf9ciAhy7J0s9Hg6H5xTQtN1DQ+jkJRN4rzQBb66ElYYcCaKck6HdA\nAHVKUHRRAgMBAAECggEAJPQaoUjT876AXgFsoTks5YGh3iDk2HVJsddjNGvNcAwb\nirhcpmUWJ/L7pTnhqd7V7nyLXX2Od5ueXz3M7oQX371A0a4TeRHW/MqRclAcLJ9O\n1A3svC3LnkUan7dCcMKAuvoDh1MUW3G7hsSbj9Mb8VxHhIj4Bib8no3o9cbRPfd1\nAbAlnNsEXEb3/K5XnwtVL4bHpLu3GK1wfyqL5WwJHQkIz+3uKCFkqezcOMOp3iiB\nGaEeabTF2KTytIwwCac+ZJ2EKr4TFcOz0Tf2elJo097O64+3Chd5rJaSzFbFo1jg\n3lWwzW1YC1rugmvr7/+gmurzA3Fs8BhPycKiZXJoqwKBgQD9F/N33KDIjRja9Cdt\nwukEpMpN8qeNzNB2J7VxLXga0syD7ctw0g+6RM3h20ZxyG2RR2bpVLL4d2Q0cJmS\nD58/vKWajL5JZ5t+MEe/VURMvEYrWlDeXtwyjBeRAEvQr0aLjDOlwC+tv7E/wp8V\nMJbPhwXunNDFFro4z2PDGUs17wKBgQDAua2YAIeR28gNYSlZSpjl2qHSuE99qfKP\nppFktAUEM2txlHDlsI282I5AkIe9RDpc+kIH6hP7LtHtPAm7aHQvU/H7R3thkkp6\n2HDp0Fhy/v/V0KVbC34Ym7QbCygbsFYmsjk1uQZK3OrXZGhKIodKJoTOCLcQPOb/\ngigEX985vwKBgEoU66gHBW0Ol9rnIm9nYOuCDNFaGJ9R9ybOorZ5F7HKSCDJxwXE\nBuR/5T+Z/nmpsCCZJM9hgm1mDQeoedseBYATiOm/DqfP0tzR5v5jR/WqGmPwMMGW\nRJ/rD67axlZUJ7MLG8cFhS83b/t4zTXXnh0qqZrZfeZiq6mbUtk1myUzAoGAMsn7\n9H3XPFoWK2h6lBxzlMd8M+L8l9pMoQy9bjN+yu+eFg2Pfwh7IdRUELHGA9vSIaSV\n+C343A4npoRW8DuDuuE9eQIKgtkhpaQahZOxa4TF+RwGJ6ssrOGDokjbZgife40m\nRIEhJmN3xBGi5j6ZNrJV91IWpEHYgmdTkmuNkVMCgYBV8CO/3tBoDQRHM3R7Pi1Z\nzZAHZJ+OHW1LtrCSw4dMqsnEHz3Zp51sN2C2PyMDy1Xee74kNSizN+v+F9gHBm9t\nYDWRZF8AJ8uuZLdcMXMNbZUFi5F0sEZkSAS5LU42OGvIa+tDXDfE+D8uIfwNqLCf\nu+8l3G4hBQqhpPaU+hIVKw==\n-----END PRIVATE KEY-----\n",
+  "client_email": "salon-phone-system@boldwings.iam.gserviceaccount.com",
+  "client_id": "103391272290669838365",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/salon-phone-system%40boldwings.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
