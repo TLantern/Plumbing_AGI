@@ -17,13 +17,21 @@ from twilio.twiml.voice_response import VoiceResponse
 from twilio.rest import Client
 from pydantic_settings import BaseSettings
 
-# Import Google Sheets integration
+# Import Google Sheets integration directly without heavy dependencies
 try:
     import sys
     import os
-    # Add the ops_integrations path directly to avoid importing the main package
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ops_integrations'))
-    from adapters.external_services.sheets import GoogleSheetsCRM
+    
+    # Direct import of GoogleSheetsCRM to avoid dependency issues
+    sheets_file_path = os.path.join(os.path.dirname(__file__), 'ops_integrations', 'adapters', 'external_services', 'sheets.py')
+    
+    # Load the GoogleSheetsCRM class directly
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sheets_module", sheets_file_path)
+    sheets_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sheets_module)
+    
+    GoogleSheetsCRM = sheets_module.GoogleSheetsCRM
     sheets_crm = GoogleSheetsCRM()
     logging.info(f"📊 Google Sheets CRM initialized: enabled={sheets_crm.enabled}, spreadsheet_id={sheets_crm.spreadsheet_id}")
     logging.info(f"📊 Environment variables: GOOGLE_SHEETS_SPREADSHEET_ID={os.getenv('GOOGLE_SHEETS_SPREADSHEET_ID')}, GOOGLE_SHEETS_CREDENTIALS_PATH={bool(os.getenv('GOOGLE_SHEETS_CREDENTIALS_PATH'))}")
