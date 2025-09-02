@@ -13,4 +13,4 @@ Environment
 
 Build & Run
 - Production build: npm run build && npm start
-- Docker: docker build -t live-ops-dashboard . && docker run -p 3000:3000 live-ops-dashboard 
+- Docker: docker build -t live-ops-dashboard . && docker run -p 3000:3000 live-ops-dashboard # Heroku deployment
