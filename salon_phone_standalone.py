@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     
     # Other settings
     LOG_LEVEL: str = "INFO"
-    DISPATCH_NUMBER: str = "+14693096560"
+    DISPATCH_NUMBER: str = "+14034794260"
 
 settings = Settings()
 
