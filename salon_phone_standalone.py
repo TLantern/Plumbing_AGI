@@ -23,12 +23,15 @@ try:
     import os
     # Add the ops_integrations path directly to avoid importing the main package
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ops_integrations'))
-    from ops_integrations.adapters.external_services.sheets import GoogleSheetsCRM
+    from adapters.external_services.sheets import GoogleSheetsCRM
     sheets_crm = GoogleSheetsCRM()
     logging.info(f"📊 Google Sheets CRM initialized: enabled={sheets_crm.enabled}, spreadsheet_id={sheets_crm.spreadsheet_id}")
+    logging.info(f"📊 Environment variables: GOOGLE_SHEETS_SPREADSHEET_ID={os.getenv('GOOGLE_SHEETS_SPREADSHEET_ID')}, GOOGLE_SHEETS_CREDENTIALS_PATH={bool(os.getenv('GOOGLE_SHEETS_CREDENTIALS_PATH'))}")
 except Exception as e:
     sheets_crm = None
     logging.error(f"Failed to import GoogleSheetsCRM: {e}")
+    import traceback
+    logging.error(f"Full traceback: {traceback.format_exc()}")
 
 # Simple CRM class with same schema as salon_phone_service.py
 class HairstylingCRM:
@@ -94,7 +97,7 @@ class Settings(BaseSettings):
     ELEVENLABS_MODEL_ID: str = "eleven_multilingual_v2"
     
     # Google Sheets CRM
-    GOOGLE_SHEETS_CREDENTIALS_FILE: str = ""
+    GOOGLE_SHEETS_CREDENTIALS_PATH: str = ""
     GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
     
     # Service endpoints
@@ -212,8 +215,11 @@ async def voice_webhook(request: Request):
             logging.info(f"📊 Logged incoming call {call_sid} to Google Sheets: {result}")
         except Exception as e:
             logging.error(f"Failed to log incoming call to Google Sheets: {e}")
+            import traceback
+            logging.error(f"Full traceback: {traceback.format_exc()}")
     else:
-        logging.warning(f"Google Sheets CRM not enabled or available for call {call_sid}")
+        sheets_enabled = sheets_crm.enabled if sheets_crm else False
+        logging.warning(f"Google Sheets CRM not enabled for call {call_sid} - sheets_crm exists: {sheets_crm is not None}, enabled: {sheets_enabled}")
     
     # Generate TwiML response - route directly to human dispatcher
     resp = VoiceResponse()
@@ -308,10 +314,15 @@ async def status_callback(request: Request):
                     "direction": "inbound",
                     "error_code": error_code or ""
                 }
-                sheets_crm.sync_booking(status_record)
-                logging.info(f"📊 Status change for {call_sid} logged to Google Sheets")
+                result = sheets_crm.sync_booking(status_record)
+                logging.info(f"📊 Status change for {call_sid} logged to Google Sheets: {result}")
             except Exception as e:
                 logging.error(f"Failed to log status change to Google Sheets: {e}")
+                import traceback
+                logging.error(f"Full traceback: {traceback.format_exc()}")
+        else:
+            sheets_enabled = sheets_crm.enabled if sheets_crm else False
+            logging.warning(f"Google Sheets CRM not enabled for status update {call_sid} - sheets_crm exists: {sheets_crm is not None}, enabled: {sheets_enabled}")
     
     return {"status": "ok"}
 
@@ -363,10 +374,15 @@ async def no_answer(request: Request):
                     "direction": "inbound",
                     "error_code": "no-answer"
                 }
-                sheets_crm.sync_booking(no_answer_record)
-                logging.info(f"📊 Missed call {call_sid} logged to Google Sheets")
+                result = sheets_crm.sync_booking(no_answer_record)
+                logging.info(f"📊 Missed call {call_sid} logged to Google Sheets: {result}")
             except Exception as e:
                 logging.error(f"Failed to log missed call to Google Sheets: {e}")
+                import traceback
+                logging.error(f"Full traceback: {traceback.format_exc()}")
+        else:
+            sheets_enabled = sheets_crm.enabled if sheets_crm else False
+            logging.warning(f"Google Sheets CRM not enabled for missed call {call_sid} - sheets_crm exists: {sheets_crm is not None}, enabled: {sheets_enabled}")
     
     # Create fallback response
     resp = VoiceResponse()
@@ -408,10 +424,16 @@ async def voicemail(request: Request):
                 "direction": "inbound",
                 "error_code": ""
             }
-            sheets_crm.sync_booking(voicemail_record)
-            logging.info(f"📊 Voicemail for {call_sid} logged to Google Sheets")
+            result = sheets_crm.sync_booking(voicemail_record)
+            logging.info(f"📊 Voicemail for {call_sid} logged to Google Sheets: {result}")
         except Exception as e:
             logging.error(f"Failed to log voicemail to Google Sheets: {e}")
+            import traceback
+            logging.error(f"Full traceback: {traceback.format_exc()}")
+    else:
+        sheets_enabled = sheets_crm.enabled if sheets_crm else False
+        call_exists = call_sid in call_info_store if call_sid else False
+        logging.warning(f"Google Sheets CRM not enabled for voicemail {call_sid} - sheets_crm exists: {sheets_crm is not None}, enabled: {sheets_enabled}, call_info exists: {call_exists}")
     
     resp = VoiceResponse()
     resp.say("Thank you for your message. We'll get back to you as soon as possible. Goodbye!")
