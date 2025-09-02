@@ -474,4 +474,6 @@ async def get_metrics():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("salon_phone_standalone:app", host="0.0.0.0", port=5001, reload=True)
+    import os
+    port = int(os.environ.get("PORT", 5001))
+    uvicorn.run("salon_phone_standalone:app", host="0.0.0.0", port=port, reload=False)
