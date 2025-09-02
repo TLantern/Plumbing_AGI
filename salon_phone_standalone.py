@@ -17,7 +17,16 @@ from twilio.twiml.voice_response import VoiceResponse
 from twilio.rest import Client
 from pydantic_settings import BaseSettings
 
-# Simple CRM class
+# Import Google Sheets integration
+try:
+    from ops_integrations.adapters.external_services.sheets import GoogleSheetsCRM
+    sheets_crm = GoogleSheetsCRM()
+    logging.info(f"📊 Google Sheets CRM initialized: enabled={sheets_crm.enabled}, spreadsheet_id={sheets_crm.spreadsheet_id}")
+except ImportError as e:
+    sheets_crm = None
+    logging.error(f"Failed to import GoogleSheetsCRM: {e}")
+
+# Simple CRM class with same schema as salon_phone_service.py
 class HairstylingCRM:
     """Comprehensive CRM for Bold Wings Hair Salon"""
     
@@ -71,6 +80,18 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_PHONE_NUMBER: str = ""
+    
+    # OpenAI (for potential future TTS)
+    OPENAI_API_KEY: str = ""
+    
+    # ElevenLabs TTS
+    ELEVENLABS_API_KEY: str = ""
+    ELEVENLABS_VOICE_ID: str = "kdmDKE6EkgrWrrykO9Qt"  # User's preferred voice
+    ELEVENLABS_MODEL_ID: str = "eleven_multilingual_v2"
+    
+    # Google Sheets CRM
+    GOOGLE_SHEETS_CREDENTIALS_FILE: str = ""
+    GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
     
     # Service endpoints
     VOICE_ENDPOINT: str = "/voice"
@@ -131,7 +152,8 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "service": "salon-phone-standalone",
-        "twilio_configured": twilio_client is not None
+        "twilio_configured": twilio_client is not None,
+        "google_sheets_enabled": sheets_crm.enabled if sheets_crm else False
     }
 
 @app.post(settings.VOICE_ENDPOINT)
@@ -163,6 +185,31 @@ async def voice_webhook(request: Request):
     if is_after_hours:
         logging.info(f"📞 After-hours call {call_sid}")
         salon_crm.current_week_metrics['after_hour_calls'] += 1
+    
+    # Log to Google Sheets immediately if enabled
+    if sheets_crm and sheets_crm.enabled:
+        try:
+            sheets_record = {
+                "timestamp": call_info.get('timestamp'),
+                "call_sid": call_sid,
+                "customer_name": "Unknown",
+                "phone": call_info.get('from', ''),
+                "call_status": "initiated",
+                "call_duration": "",
+                "after_hours": str(is_after_hours),
+                "service_requested": "Inbound Call",
+                "appointment_date": "",
+                "recording_url": "",
+                "notes": f"Call initiated - After hours: {is_after_hours}",
+                "source": "phone_system",
+                "direction": "inbound"
+            }
+            result = sheets_crm.sync_booking(sheets_record)
+            logging.info(f"📊 Logged incoming call {call_sid} to Google Sheets: {result}")
+        except Exception as e:
+            logging.error(f"Failed to log incoming call to Google Sheets: {e}")
+    else:
+        logging.warning(f"Google Sheets CRM not enabled or available for call {call_sid}")
     
     # Generate TwiML response - route directly to human dispatcher
     resp = VoiceResponse()
@@ -212,15 +259,20 @@ async def status_callback(request: Request):
         
         # Determine call outcome for better tracking
         call_outcome = "completed"
+        outcome_notes = f"Call {call_status} - Duration: {call_duration}s"
         
         if call_status == 'no-answer':
             call_outcome = "missed"
+            outcome_notes = f"Missed call - No answer from dispatcher - Duration: {call_duration}s"
         elif call_status == 'busy':
             call_outcome = "busy"
+            outcome_notes = f"Busy signal - Dispatcher line busy - Duration: {call_duration}s"
         elif call_status == 'failed':
             call_outcome = "failed"
+            outcome_notes = f"Call failed - Error: {error_code} - Duration: {call_duration}s"
         elif call_status == 'canceled':
             call_outcome = "canceled"
+            outcome_notes = f"Call canceled - Duration: {call_duration}s"
         
         # Update CRM metrics based on call outcome
         if call_outcome == "completed":
@@ -232,6 +284,30 @@ async def status_callback(request: Request):
         elif call_outcome in ["busy", "failed", "canceled"]:
             salon_crm.current_week_metrics['calls_dropped'] += 1
             logging.warning(f"📞 Call {call_sid} {call_outcome}")
+        
+        # Log to Google Sheets immediately
+        if sheets_crm and sheets_crm.enabled:
+            try:
+                status_record = {
+                    "timestamp": call_info.get('timestamp'),
+                    "call_sid": call_sid,
+                    "customer_name": "Unknown",
+                    "phone": call_info.get('from', ''),
+                    "call_status": call_outcome,
+                    "call_duration": call_duration or "0",
+                    "after_hours": str(not salon_crm._is_business_hours(datetime.fromisoformat(call_info.get('timestamp').replace('Z', '+00:00')))),
+                    "service_requested": "Inbound Call",
+                    "appointment_date": "",
+                    "recording_url": recording_url or "",
+                    "notes": outcome_notes,
+                    "source": "phone_system",
+                    "direction": "inbound",
+                    "error_code": error_code or ""
+                }
+                sheets_crm.sync_booking(status_record)
+                logging.info(f"📊 Status change for {call_sid} logged to Google Sheets")
+            except Exception as e:
+                logging.error(f"Failed to log status change to Google Sheets: {e}")
     
     return {"status": "ok"}
 
@@ -255,6 +331,39 @@ async def no_answer(request: Request):
     
     logging.warning(f"📞 No answer from dispatcher for call {call_sid}")
     
+    # Update call info
+    if call_sid in call_info_store:
+        call_info = call_info_store[call_sid]
+        call_info['status'] = 'no-answer'
+        call_info['no_answer_time'] = datetime.now().isoformat()
+        
+        # Track as missed call
+        salon_crm.current_week_metrics['missed_calls'] += 1
+        
+        # Log to Google Sheets immediately
+        if sheets_crm and sheets_crm.enabled:
+            try:
+                no_answer_record = {
+                    "timestamp": call_info.get('timestamp'),
+                    "call_sid": call_sid,
+                    "customer_name": "Unknown",
+                    "phone": call_info.get('from', ''),
+                    "call_status": "missed",
+                    "call_duration": "0",
+                    "after_hours": str(not salon_crm._is_business_hours(datetime.fromisoformat(call_info.get('timestamp').replace('Z', '+00:00')))),
+                    "service_requested": "Inbound Call",
+                    "appointment_date": "",
+                    "recording_url": "",
+                    "notes": "MISSED CALL - Dispatcher did not answer",
+                    "source": "phone_system",
+                    "direction": "inbound",
+                    "error_code": "no-answer"
+                }
+                sheets_crm.sync_booking(no_answer_record)
+                logging.info(f"📊 Missed call {call_sid} logged to Google Sheets")
+            except Exception as e:
+                logging.error(f"Failed to log missed call to Google Sheets: {e}")
+    
     # Create fallback response
     resp = VoiceResponse()
     resp.say("We're sorry, but our team is currently unavailable. Please leave a message with your name and phone number, and we'll call you back as soon as possible.")
@@ -274,6 +383,31 @@ async def voicemail(request: Request):
     recording_url = form.get("RecordingUrl")
     
     logging.info(f"📹 Voicemail received for call {call_sid}: {recording_url}")
+    
+    # Log voicemail to Google Sheets
+    if sheets_crm and sheets_crm.enabled and call_sid in call_info_store:
+        try:
+            call_info = call_info_store[call_sid]
+            voicemail_record = {
+                "timestamp": call_info.get('timestamp'),
+                "call_sid": call_sid,
+                "customer_name": "Unknown",
+                "phone": call_info.get('from', ''),
+                "call_status": "voicemail",
+                "call_duration": call_info.get('duration_sec', '0'),
+                "after_hours": str(not salon_crm._is_business_hours(datetime.fromisoformat(call_info.get('timestamp').replace('Z', '+00:00')))),
+                "service_requested": "Inbound Call",
+                "appointment_date": "",
+                "recording_url": recording_url or "",
+                "notes": "Voicemail left by caller",
+                "source": "phone_system",
+                "direction": "inbound",
+                "error_code": ""
+            }
+            sheets_crm.sync_booking(voicemail_record)
+            logging.info(f"📊 Voicemail for {call_sid} logged to Google Sheets")
+        except Exception as e:
+            logging.error(f"Failed to log voicemail to Google Sheets: {e}")
     
     resp = VoiceResponse()
     resp.say("Thank you for your message. We'll get back to you as soon as possible. Goodbye!")
@@ -322,7 +456,8 @@ async def get_metrics():
             "recentCalls": recent_calls,
             "timestamp": datetime.now().isoformat(),
             "aht": "00:00",
-            "avgWait": "00:00"
+            "avgWait": "00:00",
+            "google_sheets_enabled": sheets_crm.enabled if sheets_crm else False
         }
     except Exception as e:
         logging.error(f"Error getting metrics: {e}")
