@@ -181,6 +181,53 @@ salon_crm = HairstylingCRM()
 health_check_count = 0
 last_health_check = time.time()
 
+# Recording storage
+RECORDINGS_FILE = "recordings.json"
+
+def save_recording_to_file(call_sid: str, recording_url: str, call_info: Dict[str, Any]):
+    """Save recording URL and call details to local file"""
+    try:
+        # Load existing recordings
+        recordings = {}
+        if os.path.exists(RECORDINGS_FILE):
+            try:
+                with open(RECORDINGS_FILE, 'r') as f:
+                    recordings = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                recordings = {}
+        
+        # Add new recording
+        recordings[call_sid] = {
+            "recording_url": recording_url,
+            "timestamp": datetime.now().isoformat(),
+            "call_from": call_info.get('from', ''),
+            "call_to": call_info.get('to', ''),
+            "call_status": call_info.get('status', ''),
+            "call_duration": call_info.get('duration_sec', 0),
+            "after_hours": call_info.get('sheets_data', {}).get('after_hours', 'false'),
+            "notes": call_info.get('sheets_data', {}).get('notes', '')
+        }
+        
+        # Save back to file
+        with open(RECORDINGS_FILE, 'w') as f:
+            json.dump(recordings, f, indent=2)
+        
+        logger.info(f"📹 Recording saved to file for call {call_sid}: {recording_url}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save recording to file: {e}")
+
+def get_recordings_from_file():
+    """Get all recordings from local file"""
+    try:
+        if os.path.exists(RECORDINGS_FILE):
+            with open(RECORDINGS_FILE, 'r') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.error(f"Failed to load recordings from file: {e}")
+        return {}
+
 def log_call_to_sheets(call_sid: str, final_status: str, call_duration: str = "", recording_url: str = "", error_code: str = ""):
     """Log complete call data to Google Sheets as a single row"""
     try:
@@ -250,7 +297,8 @@ async def root():
             "endpoints": {
                 "health": "/health",
                 "voice": "/voice",
-                "metrics": "/metrics"
+                "metrics": "/metrics",
+                "recordings": "/recordings"
             },
             "uptime": time.time() - last_health_check,
             "memory_usage": len(call_info_store)
@@ -395,6 +443,10 @@ async def status_callback(request: Request):
             call_info['recording_url'] = recording_url
             call_info['error_code'] = error_code
             
+            # Save recording URL to local file if available
+            if recording_url:
+                save_recording_to_file(call_sid, recording_url, call_info)
+            
             # Track call in CRM
             salon_crm.track_call(call_info)
             
@@ -452,6 +504,11 @@ async def recording_status(request: Request):
         recording_status = form.get("RecordingStatus")
         
         logger.info(f"📹 Recording {recording_status} for call {call_sid}: {recording_url}")
+        
+        # Save recording to local file when completed
+        if recording_status == "completed" and recording_url and call_sid in call_info_store:
+            call_info = call_info_store[call_sid]
+            save_recording_to_file(call_sid, recording_url, call_info)
         
         return {"status": "ok"}
         
@@ -542,6 +599,40 @@ async def voicemail(request: Request):
         resp = VoiceResponse()
         resp.say("Thank you for your message. We'll get back to you as soon as possible. Goodbye!")
         return Response(content=str(resp), media_type="application/xml")
+
+@app.get("/recordings")
+async def get_recordings():
+    """Get all recorded calls from local file"""
+    try:
+        recordings = get_recordings_from_file()
+        
+        # Format recordings for display
+        formatted_recordings = []
+        for call_sid, recording_data in recordings.items():
+            formatted_recordings.append({
+                "call_sid": call_sid,
+                "recording_url": recording_data.get("recording_url", ""),
+                "timestamp": recording_data.get("timestamp", ""),
+                "call_from": recording_data.get("call_from", ""),
+                "call_to": recording_data.get("call_to", ""),
+                "call_status": recording_data.get("call_status", ""),
+                "call_duration": recording_data.get("call_duration", 0),
+                "after_hours": recording_data.get("after_hours", "false"),
+                "notes": recording_data.get("notes", "")
+            })
+        
+        # Sort by timestamp (newest first)
+        formatted_recordings.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        return {
+            "total_recordings": len(formatted_recordings),
+            "recordings": formatted_recordings,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting recordings: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get recordings: {str(e)}")
 
 @app.get("/metrics")
 async def get_metrics():

@@ -5,6 +5,7 @@ node_modules
 .env.development
 *.log
 .DS_Store
+recordings.json
 __pycache__/
 *.pyc
 *.pyo
