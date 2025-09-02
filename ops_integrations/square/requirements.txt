@@ -1,0 +1,22 @@
+# Square API Integration Dependencies
+
+# HTTP requests library
+requests>=2.28.0
+
+# Environment variable management
+python-dotenv>=0.19.0
+
+# Date/time handling (included in Python 3.7+)
+# datetime - built-in
+
+# JSON handling (included in Python standard library)
+# json - built-in
+
+# Logging (included in Python standard library)
+# logging - built-in
+
+# Type hints (included in Python 3.5+)
+# typing - built-in
+
+# URL handling (included in Python standard library)
+# urllib - built-in
