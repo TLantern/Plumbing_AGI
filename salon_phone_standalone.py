@@ -19,10 +19,14 @@ from pydantic_settings import BaseSettings
 
 # Import Google Sheets integration
 try:
-    from ops_integrations.adapters.external_services.sheets import GoogleSheetsCRM
+    import sys
+    import os
+    # Add the ops_integrations path directly to avoid importing the main package
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ops_integrations'))
+    from adapters.external_services.sheets import GoogleSheetsCRM
     sheets_crm = GoogleSheetsCRM()
     logging.info(f"📊 Google Sheets CRM initialized: enabled={sheets_crm.enabled}, spreadsheet_id={sheets_crm.spreadsheet_id}")
-except ImportError as e:
+except Exception as e:
     sheets_crm = None
     logging.error(f"Failed to import GoogleSheetsCRM: {e}")
 
