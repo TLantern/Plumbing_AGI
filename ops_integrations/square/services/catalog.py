@@ -126,24 +126,8 @@ class CatalogService:
         try:
             logger.info(f"Fetching bookable services for location: {location_id}")
             
-            # Search for items that have appointment segments (bookable services)
-            search_query = {
-                "object_types": ["ITEM"],
-                "query": {
-                    "exact_query": {
-                        "attribute_name": "appointment_segments",
-                        "attribute_value": "*"
-                    }
-                }
-            }
-            
-            data = {
-                "object_types": ["ITEM", "ITEM_VARIATION"],
-                "query": search_query,
-                "include_related_objects": True
-            }
-            
-            response = self.client.post("/v2/catalog/search", data=data)
+            # Use the simple catalog list endpoint instead of search
+            response = self.client.get("/v2/catalog/list")
             
             objects = response.get("objects", [])
             
@@ -152,8 +136,9 @@ class CatalogService:
             for obj in objects:
                 if obj.get("type") == "ITEM":
                     item_data = obj.get("item_data", {})
-                    # Check if item has appointment segments defined
-                    if "appointment_segments" in item_data:
+                    # Check if item has appointment segments defined OR if it's a service item
+                    if ("appointment_segments" in item_data or 
+                        item_data.get("product_type") == "REGULAR"):
                         bookable_services.append(obj)
             
             logger.info(f"Found {len(bookable_services)} bookable services")
@@ -298,3 +283,124 @@ class CatalogService:
         except Exception as e:
             logger.error(f"Failed to check if service is bookable: {e}")
             return False
+
+    def create_catalog_item(self, item_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Create a new catalog item
+        
+        Args:
+            item_data: Item data including name, description, variations, etc.
+            
+        Returns:
+            Created catalog object if successful, None otherwise
+        """
+        try:
+            logger.info(f"Creating catalog item: {item_data.get('name', 'Unnamed')}")
+            
+            # Prepare the catalog object
+            catalog_object = {
+                "type": "ITEM",
+                "id": f"#temp_{hash(item_data.get('name', '')) % 1000000}",
+                "item_data": item_data
+            }
+            
+            # Create the item using Square API
+            response = self.client.post("/v2/catalog/object", data=catalog_object)
+            
+            if response and response.get("object"):
+                logger.info(f"Successfully created catalog item: {response['object'].get('id')}")
+                return response["object"]
+            else:
+                logger.error("Failed to create catalog item - no object returned")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to create catalog item: {e}")
+            return None
+
+    def create_bookable_service(self, name: str, description: str, price_cents: int, 
+                              category: str, duration_minutes: int = 60) -> Optional[Dict[str, Any]]:
+        """
+        Create a bookable service in the catalog
+        
+        Args:
+            name: Service name
+            description: Service description
+            price_cents: Price in cents
+            category: Service category
+            duration_minutes: Duration in minutes
+            
+        Returns:
+            Created service object if successful, None otherwise
+        """
+        try:
+            logger.info(f"Creating bookable service: {name}")
+            
+            # Create the item data with proper Square API structure
+            item_data = {
+                "name": name,
+                "description": description,
+                "category_id": category,
+                "variations": [
+                    {
+                        "type": "ITEM_VARIATION",
+                        "id": f"#temp_var_{hash(name) % 1000000}",
+                        "item_variation_data": {
+                            "name": "Standard",
+                            "pricing_type": "FIXED_PRICING",
+                            "price_money": {
+                                "amount": price_cents,
+                                "currency": "CAD"
+                            }
+                        }
+                    }
+                ]
+            }
+            
+            # Create the catalog object
+            catalog_object = {
+                "type": "ITEM",
+                "id": f"#temp_{hash(name) % 1000000}",
+                "item_data": item_data
+            }
+            
+            # Create the item using Square API
+            response = self.client.post("/v2/catalog/object", data=catalog_object)
+            
+            if response and response.get("object"):
+                logger.info(f"Successfully created catalog item: {response['object'].get('id')}")
+                
+                # Now add appointment segments to make it bookable
+                item_id = response['object']['id']
+                variation_id = response['object']['item_data']['variations'][0]['id']
+                
+                # Update the item to add appointment segments
+                update_data = {
+                    "type": "ITEM",
+                    "id": item_id,
+                    "item_data": {
+                        "appointment_segments": [
+                            {
+                                "duration_minutes": duration_minutes,
+                                "service_variation_id": variation_id
+                            }
+                        ]
+                    }
+                }
+                
+                # Update the item
+                update_response = self.client.post(f"/v2/catalog/object", data=update_data)
+                
+                if update_response and update_response.get("object"):
+                    logger.info(f"Successfully added appointment segments to: {item_id}")
+                    return update_response["object"]
+                else:
+                    logger.warning(f"Created item but failed to add appointment segments: {item_id}")
+                    return response["object"]
+            else:
+                logger.error("Failed to create catalog item - no object returned")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to create bookable service '{name}': {e}")
+            return None

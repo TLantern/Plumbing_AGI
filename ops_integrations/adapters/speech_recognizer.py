@@ -48,7 +48,8 @@ class SpeechRecognizer:
             
             # Send to remote Whisper service
             files = {"file": ("audio.wav", wav_data, "audio/wav")}
-            response = await self.http_client.post(f"{self.whisper_url}/transcribe", files=files)
+            url = f"{self.whisper_url.rstrip('/')}/transcribe"
+            response = await self.http_client.post(url, files=files)
             
             if response.status_code == 200:
                 result = response.json()
@@ -60,11 +61,44 @@ class SpeechRecognizer:
                 
                 return text, transcription_time, avg_logprob
             else:
-                logger.error(f"Remote Whisper failed for {call_sid}: {response.status_code}")
+                reason = getattr(response, "reason_phrase", "")
+                elapsed = getattr(response, "elapsed", None)
+                elapsed_s = f"{elapsed.total_seconds():.2f}s" if elapsed else "N/A"
+                content_type = response.headers.get("content-type", "")
+                body_text = None
+                error_json = None
+                try:
+                    # Prefer JSON error details if present
+                    error_json = response.json()
+                except Exception:
+                    try:
+                        body = response.text or ""
+                        body_text = body if len(body) <= 1000 else body[:1000] + "...(truncated)"
+                    except Exception:
+                        body_text = "<unreadable body>"
+
+                logger.error(
+                    f"Remote Whisper failed for {call_sid}: status={response.status_code} reason='{reason}' "
+                    f"url={url} elapsed={elapsed_s} content_type='{content_type}'"
+                )
+                if error_json is not None:
+                    logger.error(f"Remote Whisper error body (json) for {call_sid}: {error_json}")
+                elif body_text:
+                    logger.error(f"Remote Whisper error body (text) for {call_sid}: {body_text}")
                 return None, 0.0, None
                 
         except Exception as e:
-            logger.error(f"Remote Whisper failed for {call_sid}: {e}")
+            request_url = None
+            try:
+                if isinstance(e, httpx.RequestError) and getattr(e, "request", None) is not None:
+                    request_url = str(e.request.url)
+            except Exception:
+                request_url = None
+            error_type = type(e).__name__
+            detail = str(e)
+            logger.error(
+                f"Remote Whisper exception for {call_sid}: type={error_type} url={request_url or (self.whisper_url and self.whisper_url.rstrip('/') + '/transcribe')} detail={detail}"
+            )
             return None, 0.0, None
     
     async def _transcribe_openai(self, audio_data: bytes, call_sid: str) -> Tuple[Optional[str], float, Optional[float]]:

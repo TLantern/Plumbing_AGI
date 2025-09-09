@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+COST_COMPARISON.md
+*.md
+
+# Deployment files
+deploy.sh
+deploy_railway.sh
+fly.toml
+railway.json
+render.yaml
+Procfile
+runtime.txt
+
+# Test files
+test_service.py
+colab_setup.py
+colab_whisper.ipynb
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

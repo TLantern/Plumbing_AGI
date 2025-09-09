@@ -57,6 +57,9 @@ class GoogleSheetsCRM:
             "Phone Number",
             "Call Status",
             "Call Duration (sec)",
+            "Call Duration Bucket",
+            "Response Speed (sec)",
+            "Revenue per Call ($)",
             "After Hours",
             "Service Requested",
             "Appointment Date",
@@ -75,6 +78,9 @@ class GoogleSheetsCRM:
             rec.get("phone", ""),
             rec.get("call_status", ""),
             rec.get("call_duration", ""),
+            rec.get("call_duration_bucket", ""),
+            rec.get("response_speed", ""),
+            rec.get("revenue_per_call", ""),
             rec.get("after_hours", ""),
             rec.get("service_requested", ""),
             rec.get("appointment_date", ""),
@@ -91,7 +97,7 @@ class GoogleSheetsCRM:
             # Check if headers exist by reading the first row
             result = self._service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id,
-                range=f"{self.tab_name}!A1:M1"
+                range=f"{self.tab_name}!A1:Q1"
             ).execute()
             
             values = result.get('values', [])
@@ -156,6 +162,9 @@ class GoogleSheetsCRM:
             "phone": booking.get("phone") or "",
             "call_status": booking.get("call_status") or "",
             "call_duration": booking.get("call_duration") or "",
+            "call_duration_bucket": booking.get("call_duration_bucket") or "",
+            "response_speed": booking.get("response_speed") or "",
+            "revenue_per_call": booking.get("revenue_per_call") or "",
             "after_hours": booking.get("after_hours") or "",
             "service_requested": booking.get("service_requested") or booking.get("service_type") or "",
             "appointment_date": booking.get("appointment_date") or "",
@@ -175,4 +184,55 @@ class GoogleSheetsCRM:
             return {"ok": ok, "mode": "mock"}
 
         logging.info("Sheets CRM disabled and no mock_log_path set; skipping booking sync")
-        return {"ok": False, "mode": "disabled"} 
+        return {"ok": False, "mode": "disabled"}
+
+    @staticmethod
+    def calculate_call_duration_bucket(duration_seconds: float) -> str:
+        """Calculate call duration bucket based on duration in seconds"""
+        if duration_seconds < 30:
+            return "Short (<30s)"
+        elif duration_seconds <= 120:  # 2 minutes
+            return "Medium (30s-2min)"
+        else:
+            return "Long (>2min)"
+
+    @staticmethod
+    def calculate_response_speed(first_speech_time: float, first_response_time: float) -> float:
+        """Calculate response speed in seconds from first speech to first response"""
+        if first_speech_time and first_response_time and first_response_time > first_speech_time:
+            return round(first_response_time - first_speech_time, 2)
+        return 0.0
+
+    @staticmethod
+    def calculate_revenue_per_call(service_price: float, appointment_scheduled: bool = False) -> float:
+        """Calculate revenue per call based on service price and appointment status"""
+        if appointment_scheduled and service_price > 0:
+            return service_price
+        return 0.0
+
+    def test_sheets_integration(self) -> Dict[str, Any]:
+        """Test function to verify Google Sheets integration with new metrics"""
+        test_record = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "call_sid": f"TEST_{int(datetime.utcnow().timestamp())}",
+            "customer_name": "Test Customer",
+            "phone": "+1234567890",
+            "call_status": "completed",
+            "call_duration": "45",
+            "call_duration_bucket": self.calculate_call_duration_bucket(45),
+            "response_speed": "2.5",
+            "revenue_per_call": "85.00",
+            "after_hours": "false",
+            "service_requested": "Braids - Cornrow",
+            "appointment_date": "2024-01-15T14:00:00Z",
+            "recording_url": "",
+            "notes": "Test call with enhanced metrics tracking",
+            "source": "test_system",
+            "direction": "inbound",
+            "error_code": ""
+        }
+        
+        logging.info("🧪 Testing Google Sheets integration with enhanced metrics...")
+        result = self.sync_booking(test_record)
+        logging.info(f"🧪 Test result: {result}")
+        return result 

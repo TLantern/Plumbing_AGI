@@ -4,3 +4,457 @@
 2025-09-01 11:35:15,640 - CALL_EVENT - INFO - [INITIATED] Call CA7b3659b0511056015b11bd73a267ee0e - {'from': '+19404656984', 'to': '+15876009008', 'notes': 'Incoming call received'}
 2025-09-01 11:35:16,716 - CALL_EVENT - INFO - [ROUTING] Call CA7b3659b0511056015b11bd73a267ee0e - {'to': '+14693096560', 'notes': 'Routing call to dispatcher: +14693096560'}
 2025-09-01 11:36:02,446 - CALL_EVENT - WARNING - [NO_ANSWER] Call CA7b3659b0511056015b11bd73a267ee0e - {'notes': 'Dispatcher did not answer call', 'error_code': 'no-answer'}
+2025-09-03 14:07:35,292 - CALL_EVENT - INFO - [INITIATED] Call TEST123 - {'from': '+1234567890', 'to': '+18084826296', 'notes': 'Incoming call received'}
+2025-09-03 14:07:40,882 - CALL_EVENT - INFO - [AI_HANDLING] Call TEST123 - {'notes': 'AI agent now handling call - no human forwarding'}
+2025-09-03 14:19:11,494 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call TEST456 - {'from': '+1234567890', 'to': '+18084826296', 'notes': 'Incoming call received'}
+2025-09-03 14:19:15,929 - CALL_EVENT - ERROR - ❌ SALON ERROR [TEST456]: TTS generation failed: name 'log_salon_success' is not defined
+2025-09-03 14:19:15,930 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call TEST456 - {'notes': 'AI agent now handling call - no human forwarding'}
+2025-09-03 14:19:52,735 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call TEST789 - {'from': '+1234567890', 'to': '+18084826296', 'notes': 'Incoming call received'}
+2025-09-03 14:19:56,587 - CALL_EVENT - ERROR - ❌ SALON ERROR [TEST789]: TTS generation failed: name 'log_salon_success' is not defined
+2025-09-03 14:19:56,588 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call TEST789 - {'notes': 'AI agent now handling call - no human forwarding'}
+2025-09-03 14:20:37,247 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call TEST999 - {'from': '+1234567890', 'to': '+18084826296', 'notes': 'Incoming call received'}
+2025-09-03 14:20:41,312 - CALL_EVENT - ERROR - ❌ SALON ERROR [TEST999]: TTS generation failed: name 'log_salon_success' is not defined
+2025-09-03 14:20:41,316 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call TEST999 - {'notes': 'AI agent now handling call - no human forwarding'}
+2025-09-03 20:41:08,739 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA3b475614d81ea489bcfcae0999301b2d - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Incoming call received'}
+2025-09-03 20:41:10,602 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA3b475614d81ea489bcfcae0999301b2d - {'notes': 'AI agent now handling call - no human forwarding'}
+2025-09-03 20:45:54,152 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6a3edac5e8f3524add8de6e502197dff]: ElevenLabs TTS generated successfully: 147584 bytes
+2025-09-03 20:45:54,153 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6a3edac5e8f3524add8de6e502197dff]: TTS audio generated successfully: 147584 bytes
+2025-09-03 20:45:54,153 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6a3edac5e8f3524add8de6e502197dff]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA6a3edac5e8f3524add8de6e502197dff.mp3?v=1
+2025-09-03 20:45:54,154 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6a3edac5e8f3524add8de6e502197dff]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA6a3edac5e8f3524add8de6e502197dff.mp3?v=1 with callback tracking
+2025-09-03 20:45:54,810 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA6a3edac5e8f3524add8de6e502197dff - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 20:45:55,160 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA6a3edac5e8f3524add8de6e502197dff - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 20:51:19,481 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA29714f0ace76e6bc888964262fa0dfa8]: ElevenLabs TTS generated successfully: 156779 bytes
+2025-09-03 20:51:19,483 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA29714f0ace76e6bc888964262fa0dfa8]: TTS audio generated successfully: 156779 bytes
+2025-09-03 20:51:19,484 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA29714f0ace76e6bc888964262fa0dfa8]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA29714f0ace76e6bc888964262fa0dfa8.mp3?v=1
+2025-09-03 20:51:19,484 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA29714f0ace76e6bc888964262fa0dfa8]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA29714f0ace76e6bc888964262fa0dfa8.mp3?v=1 with callback tracking
+2025-09-03 20:51:20,295 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA29714f0ace76e6bc888964262fa0dfa8 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 20:51:21,098 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA29714f0ace76e6bc888964262fa0dfa8 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 20:54:08,000 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAbc77997d5592add4d7cd322325897745]: ElevenLabs TTS generated successfully: 153018 bytes
+2025-09-03 20:54:08,003 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAbc77997d5592add4d7cd322325897745]: TTS audio generated successfully: 153018 bytes
+2025-09-03 20:54:08,004 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAbc77997d5592add4d7cd322325897745]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAbc77997d5592add4d7cd322325897745.mp3?v=1
+2025-09-03 20:54:08,006 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAbc77997d5592add4d7cd322325897745]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAbc77997d5592add4d7cd322325897745.mp3?v=1 with callback tracking
+2025-09-03 20:54:08,723 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAbc77997d5592add4d7cd322325897745 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 20:54:09,149 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAbc77997d5592add4d7cd322325897745 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 20:57:11,842 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd8e3e31e2982d817672bcce3577135ff]: ElevenLabs TTS generated successfully: 160959 bytes
+2025-09-03 20:57:11,843 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd8e3e31e2982d817672bcce3577135ff]: TTS audio generated successfully: 160959 bytes
+2025-09-03 20:57:11,844 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd8e3e31e2982d817672bcce3577135ff]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAd8e3e31e2982d817672bcce3577135ff.mp3?v=1
+2025-09-03 20:57:11,844 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd8e3e31e2982d817672bcce3577135ff]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAd8e3e31e2982d817672bcce3577135ff.mp3?v=1 with callback tracking
+2025-09-03 20:57:12,538 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAd8e3e31e2982d817672bcce3577135ff - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 20:57:12,948 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAd8e3e31e2982d817672bcce3577135ff - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 20:57:22,295 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b3a8478a06cc06f574b598d2f095a3a]: ElevenLabs TTS generated successfully: 152182 bytes
+2025-09-03 20:57:22,298 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b3a8478a06cc06f574b598d2f095a3a]: TTS audio generated successfully: 152182 bytes
+2025-09-03 20:57:22,300 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b3a8478a06cc06f574b598d2f095a3a]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA3b3a8478a06cc06f574b598d2f095a3a.mp3?v=1
+2025-09-03 20:57:22,301 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b3a8478a06cc06f574b598d2f095a3a]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA3b3a8478a06cc06f574b598d2f095a3a.mp3?v=1 with callback tracking
+2025-09-03 20:57:23,109 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA3b3a8478a06cc06f574b598d2f095a3a - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 20:57:24,105 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA3b3a8478a06cc06f574b598d2f095a3a - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 20:57:52,956 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA38698614d0a2b4e042334346514f7de8]: ElevenLabs TTS generated successfully: 156779 bytes
+2025-09-03 20:57:52,960 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA38698614d0a2b4e042334346514f7de8]: TTS audio generated successfully: 156779 bytes
+2025-09-03 20:57:52,961 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA38698614d0a2b4e042334346514f7de8]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA38698614d0a2b4e042334346514f7de8.mp3?v=1
+2025-09-03 20:57:52,964 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA38698614d0a2b4e042334346514f7de8]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA38698614d0a2b4e042334346514f7de8.mp3?v=1 with callback tracking
+2025-09-03 20:57:53,811 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA38698614d0a2b4e042334346514f7de8 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 20:57:54,203 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA38698614d0a2b4e042334346514f7de8 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 21:04:03,896 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA065335d6d965c917822b56f820317e31]: ElevenLabs TTS generated successfully: 160541 bytes
+2025-09-03 21:04:03,903 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA065335d6d965c917822b56f820317e31]: TTS audio generated successfully: 160541 bytes
+2025-09-03 21:04:03,907 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA065335d6d965c917822b56f820317e31]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA065335d6d965c917822b56f820317e31.mp3?v=1
+2025-09-03 21:04:03,911 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA065335d6d965c917822b56f820317e31]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA065335d6d965c917822b56f820317e31.mp3?v=1 with callback tracking
+2025-09-03 21:04:05,215 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA065335d6d965c917822b56f820317e31 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 21:04:06,809 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA065335d6d965c917822b56f820317e31 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 21:04:20,611 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA10e49b4f40760df0729b2ee98f5ceebe]: ElevenLabs TTS generated successfully: 159705 bytes
+2025-09-03 21:04:20,612 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA10e49b4f40760df0729b2ee98f5ceebe]: TTS audio generated successfully: 159705 bytes
+2025-09-03 21:04:20,614 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA10e49b4f40760df0729b2ee98f5ceebe]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA10e49b4f40760df0729b2ee98f5ceebe.mp3?v=1
+2025-09-03 21:04:20,618 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA10e49b4f40760df0729b2ee98f5ceebe]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA10e49b4f40760df0729b2ee98f5ceebe.mp3?v=1 with callback tracking
+2025-09-03 21:04:21,105 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA10e49b4f40760df0729b2ee98f5ceebe - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 21:04:21,707 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA10e49b4f40760df0729b2ee98f5ceebe - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 21:08:27,969 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdca010f3c88cdc5b54f09e4f4fa7cd48]: ElevenLabs TTS generated successfully: 145494 bytes
+2025-09-03 21:08:27,971 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdca010f3c88cdc5b54f09e4f4fa7cd48]: TTS audio generated successfully: 145494 bytes
+2025-09-03 21:08:27,972 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdca010f3c88cdc5b54f09e4f4fa7cd48]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAdca010f3c88cdc5b54f09e4f4fa7cd48.mp3?v=1
+2025-09-03 21:08:27,973 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdca010f3c88cdc5b54f09e4f4fa7cd48]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAdca010f3c88cdc5b54f09e4f4fa7cd48.mp3?v=1 with callback tracking
+2025-09-03 21:08:29,092 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAdca010f3c88cdc5b54f09e4f4fa7cd48 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 21:08:29,884 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAdca010f3c88cdc5b54f09e4f4fa7cd48 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-03 21:08:47,499 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA39ee586374debbbe8234b0e0a0301720]: ElevenLabs TTS generated successfully: 159705 bytes
+2025-09-03 21:08:47,501 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA39ee586374debbbe8234b0e0a0301720]: TTS audio generated successfully: 159705 bytes
+2025-09-03 21:08:47,501 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA39ee586374debbbe8234b0e0a0301720]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA39ee586374debbbe8234b0e0a0301720.mp3?v=1
+2025-09-03 21:08:47,502 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA39ee586374debbbe8234b0e0a0301720]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA39ee586374debbbe8234b0e0a0301720.mp3?v=1 with callback tracking
+2025-09-03 21:08:48,482 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA39ee586374debbbe8234b0e0a0301720 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-03 21:08:48,982 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA39ee586374debbbe8234b0e0a0301720 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 07:53:54,439 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAab0e5592daba6b678906123c9c5292db]: ElevenLabs TTS generated successfully: 150092 bytes
+2025-09-04 07:53:54,440 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAab0e5592daba6b678906123c9c5292db]: TTS audio generated successfully: 150092 bytes
+2025-09-04 07:53:54,442 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAab0e5592daba6b678906123c9c5292db]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAab0e5592daba6b678906123c9c5292db.mp3?v=1
+2025-09-04 07:53:54,443 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAab0e5592daba6b678906123c9c5292db]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAab0e5592daba6b678906123c9c5292db.mp3?v=1 with callback tracking
+2025-09-04 07:53:56,194 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAab0e5592daba6b678906123c9c5292db - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 07:53:57,078 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAab0e5592daba6b678906123c9c5292db - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 08:02:36,848 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA4b6b157c767215c203e03ddbe811656f]: ElevenLabs TTS generated successfully: 146330 bytes
+2025-09-04 08:02:36,852 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA4b6b157c767215c203e03ddbe811656f]: TTS audio generated successfully: 146330 bytes
+2025-09-04 08:02:36,853 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA4b6b157c767215c203e03ddbe811656f]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA4b6b157c767215c203e03ddbe811656f.mp3?v=1
+2025-09-04 08:02:36,855 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA4b6b157c767215c203e03ddbe811656f]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA4b6b157c767215c203e03ddbe811656f.mp3?v=1 with callback tracking
+2025-09-04 08:02:37,741 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA4b6b157c767215c203e03ddbe811656f - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 08:02:38,630 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA4b6b157c767215c203e03ddbe811656f - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 08:19:23,725 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82817d20f14379ac3d4d4a6f485c4268]: ElevenLabs TTS generated successfully: 148420 bytes
+2025-09-04 08:19:23,727 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82817d20f14379ac3d4d4a6f485c4268]: TTS audio generated successfully: 148420 bytes
+2025-09-04 08:19:23,729 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82817d20f14379ac3d4d4a6f485c4268]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA82817d20f14379ac3d4d4a6f485c4268.mp3?v=1
+2025-09-04 08:19:23,730 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82817d20f14379ac3d4d4a6f485c4268]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA82817d20f14379ac3d4d4a6f485c4268.mp3?v=1 with callback tracking
+2025-09-04 08:19:27,434 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA82817d20f14379ac3d4d4a6f485c4268 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 08:19:28,419 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA82817d20f14379ac3d4d4a6f485c4268 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:07:59,490 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2d792e1e0d16fe871efe41ff0c275664]: ElevenLabs TTS generated successfully: 149256 bytes
+2025-09-04 15:07:59,496 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2d792e1e0d16fe871efe41ff0c275664]: TTS audio generated successfully: 149256 bytes
+2025-09-04 15:07:59,497 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2d792e1e0d16fe871efe41ff0c275664]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA2d792e1e0d16fe871efe41ff0c275664.mp3?v=1
+2025-09-04 15:07:59,500 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2d792e1e0d16fe871efe41ff0c275664]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA2d792e1e0d16fe871efe41ff0c275664.mp3?v=1 with callback tracking
+2025-09-04 15:08:01,388 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA2d792e1e0d16fe871efe41ff0c275664 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 15:08:01,983 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA2d792e1e0d16fe871efe41ff0c275664 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:14:22,179 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2b5b5b2bad92d3a97839ce685c95b1a5]: ElevenLabs TTS generated successfully: 157615 bytes
+2025-09-04 15:14:22,182 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2b5b5b2bad92d3a97839ce685c95b1a5]: TTS audio generated successfully: 157615 bytes
+2025-09-04 15:14:22,183 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2b5b5b2bad92d3a97839ce685c95b1a5]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA2b5b5b2bad92d3a97839ce685c95b1a5.mp3?v=1
+2025-09-04 15:14:22,184 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2b5b5b2bad92d3a97839ce685c95b1a5]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA2b5b5b2bad92d3a97839ce685c95b1a5.mp3?v=1 with callback tracking
+2025-09-04 15:14:23,932 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA2b5b5b2bad92d3a97839ce685c95b1a5 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 15:14:24,692 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA2b5b5b2bad92d3a97839ce685c95b1a5 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:23:40,855 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA9ec4123427aa9ba5810bab3cf1e059cf]: ElevenLabs TTS generated successfully: 150928 bytes
+2025-09-04 15:23:40,856 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA9ec4123427aa9ba5810bab3cf1e059cf]: TTS audio generated successfully: 150928 bytes
+2025-09-04 15:23:40,858 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA9ec4123427aa9ba5810bab3cf1e059cf]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA9ec4123427aa9ba5810bab3cf1e059cf.mp3?v=1
+2025-09-04 15:23:40,860 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA9ec4123427aa9ba5810bab3cf1e059cf]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA9ec4123427aa9ba5810bab3cf1e059cf.mp3?v=1 with callback tracking
+2025-09-04 15:23:42,454 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA9ec4123427aa9ba5810bab3cf1e059cf - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 15:23:43,080 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA9ec4123427aa9ba5810bab3cf1e059cf - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:27:26,865 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA36cb090bb98f70ec8c795a65d7ff0166]: ElevenLabs TTS generated successfully: 147166 bytes
+2025-09-04 15:27:26,866 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA36cb090bb98f70ec8c795a65d7ff0166]: TTS audio generated successfully: 147166 bytes
+2025-09-04 15:27:26,867 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA36cb090bb98f70ec8c795a65d7ff0166]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA36cb090bb98f70ec8c795a65d7ff0166.mp3?v=1
+2025-09-04 15:27:26,870 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA36cb090bb98f70ec8c795a65d7ff0166]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA36cb090bb98f70ec8c795a65d7ff0166.mp3?v=1 with callback tracking
+2025-09-04 15:27:28,244 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA36cb090bb98f70ec8c795a65d7ff0166 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 15:27:28,875 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA36cb090bb98f70ec8c795a65d7ff0166 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:30:37,727 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAfbb80b706389c0ec82a81dc5fdb2a199]: ElevenLabs TTS generated successfully: 151346 bytes
+2025-09-04 15:30:37,729 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAfbb80b706389c0ec82a81dc5fdb2a199]: TTS audio generated successfully: 151346 bytes
+2025-09-04 15:30:37,729 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAfbb80b706389c0ec82a81dc5fdb2a199]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAfbb80b706389c0ec82a81dc5fdb2a199.mp3?v=1
+2025-09-04 15:30:37,730 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAfbb80b706389c0ec82a81dc5fdb2a199]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAfbb80b706389c0ec82a81dc5fdb2a199.mp3?v=1 with callback tracking
+2025-09-04 15:30:39,180 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAfbb80b706389c0ec82a81dc5fdb2a199 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 15:30:39,736 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAfbb80b706389c0ec82a81dc5fdb2a199 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:31:04,907 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAfbb80b706389c0ec82a81dc5fdb2a199]: ElevenLabs TTS generated successfully: 71934 bytes
+2025-09-04 15:38:17,530 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA606936f33016a6e22ef7d25a6a835179]: ElevenLabs TTS generated successfully: 155943 bytes
+2025-09-04 15:38:17,531 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA606936f33016a6e22ef7d25a6a835179]: TTS audio generated successfully: 155943 bytes
+2025-09-04 15:38:17,532 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA606936f33016a6e22ef7d25a6a835179]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA606936f33016a6e22ef7d25a6a835179.mp3?v=1
+2025-09-04 15:38:17,533 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA606936f33016a6e22ef7d25a6a835179]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA606936f33016a6e22ef7d25a6a835179.mp3?v=1 with callback tracking
+2025-09-04 15:38:19,048 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA606936f33016a6e22ef7d25a6a835179 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 15:38:19,664 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA606936f33016a6e22ef7d25a6a835179 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:38:45,326 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA606936f33016a6e22ef7d25a6a835179]: ElevenLabs TTS generated successfully: 75695 bytes
+2025-09-04 15:38:45,328 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA606936f33016a6e22ef7d25a6a835179]: TTS audio generated successfully: 75695 bytes
+2025-09-04 15:38:45,328 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA606936f33016a6e22ef7d25a6a835179]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA606936f33016a6e22ef7d25a6a835179.mp3?v=2
+2025-09-04 15:38:45,329 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA606936f33016a6e22ef7d25a6a835179]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA606936f33016a6e22ef7d25a6a835179.mp3?v=2 with callback tracking
+2025-09-04 15:50:02,673 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA344e3c86f6d42810f11eaa38a852bf61]: ElevenLabs TTS generated successfully: 152182 bytes
+2025-09-04 15:50:02,675 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA344e3c86f6d42810f11eaa38a852bf61]: TTS audio generated successfully: 152182 bytes
+2025-09-04 15:50:02,675 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA344e3c86f6d42810f11eaa38a852bf61]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA344e3c86f6d42810f11eaa38a852bf61.mp3?v=1
+2025-09-04 15:50:02,677 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA344e3c86f6d42810f11eaa38a852bf61]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA344e3c86f6d42810f11eaa38a852bf61.mp3?v=1 with callback tracking
+2025-09-04 15:50:04,105 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA344e3c86f6d42810f11eaa38a852bf61 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 15:50:04,719 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA344e3c86f6d42810f11eaa38a852bf61 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:50:28,080 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA344e3c86f6d42810f11eaa38a852bf61]: ElevenLabs TTS generated successfully: 77367 bytes
+2025-09-04 15:50:28,080 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA344e3c86f6d42810f11eaa38a852bf61]: TTS audio generated successfully: 77367 bytes
+2025-09-04 15:50:28,081 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA344e3c86f6d42810f11eaa38a852bf61]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA344e3c86f6d42810f11eaa38a852bf61.mp3?v=2
+2025-09-04 15:50:28,081 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA344e3c86f6d42810f11eaa38a852bf61]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA344e3c86f6d42810f11eaa38a852bf61.mp3?v=2 with callback tracking
+2025-09-04 15:55:24,013 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAe5171ff054fd1c6e6fd2132265d2e2d8]: ElevenLabs TTS generated successfully: 150092 bytes
+2025-09-04 15:55:24,014 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAe5171ff054fd1c6e6fd2132265d2e2d8]: TTS audio generated successfully: 150092 bytes
+2025-09-04 15:55:24,015 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAe5171ff054fd1c6e6fd2132265d2e2d8]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAe5171ff054fd1c6e6fd2132265d2e2d8.mp3?v=1
+2025-09-04 15:55:24,016 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAe5171ff054fd1c6e6fd2132265d2e2d8]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAe5171ff054fd1c6e6fd2132265d2e2d8.mp3?v=1 with callback tracking
+2025-09-04 15:55:25,371 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAe5171ff054fd1c6e6fd2132265d2e2d8 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 15:55:26,070 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAe5171ff054fd1c6e6fd2132265d2e2d8 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 15:55:45,817 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAe5171ff054fd1c6e6fd2132265d2e2d8]: ElevenLabs TTS generated successfully: 74859 bytes
+2025-09-04 15:55:45,819 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAe5171ff054fd1c6e6fd2132265d2e2d8]: TTS audio generated successfully: 74859 bytes
+2025-09-04 15:55:45,819 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAe5171ff054fd1c6e6fd2132265d2e2d8]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAe5171ff054fd1c6e6fd2132265d2e2d8.mp3?v=2
+2025-09-04 15:55:45,820 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAe5171ff054fd1c6e6fd2132265d2e2d8]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAe5171ff054fd1c6e6fd2132265d2e2d8.mp3?v=2 with callback tracking
+2025-09-04 16:00:52,193 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA5caa8cd51c88f496c415e1fbed5bc77b]: ElevenLabs TTS generated successfully: 147584 bytes
+2025-09-04 16:00:52,195 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA5caa8cd51c88f496c415e1fbed5bc77b]: TTS audio generated successfully: 147584 bytes
+2025-09-04 16:00:52,196 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA5caa8cd51c88f496c415e1fbed5bc77b]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA5caa8cd51c88f496c415e1fbed5bc77b.mp3?v=1
+2025-09-04 16:00:52,197 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA5caa8cd51c88f496c415e1fbed5bc77b]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA5caa8cd51c88f496c415e1fbed5bc77b.mp3?v=1 with callback tracking
+2025-09-04 16:00:53,673 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA5caa8cd51c88f496c415e1fbed5bc77b - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 16:00:54,330 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA5caa8cd51c88f496c415e1fbed5bc77b - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 16:01:15,093 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA5caa8cd51c88f496c415e1fbed5bc77b]: ElevenLabs TTS generated successfully: 74859 bytes
+2025-09-04 16:01:15,095 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA5caa8cd51c88f496c415e1fbed5bc77b]: TTS audio generated successfully: 74859 bytes
+2025-09-04 16:01:15,095 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA5caa8cd51c88f496c415e1fbed5bc77b]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA5caa8cd51c88f496c415e1fbed5bc77b.mp3?v=2
+2025-09-04 16:01:15,096 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA5caa8cd51c88f496c415e1fbed5bc77b]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA5caa8cd51c88f496c415e1fbed5bc77b.mp3?v=2 with callback tracking
+2025-09-04 16:05:21,094 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0cadffd55815953137b91cfaaef076b5]: ElevenLabs TTS generated successfully: 146330 bytes
+2025-09-04 16:05:21,095 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0cadffd55815953137b91cfaaef076b5]: TTS audio generated successfully: 146330 bytes
+2025-09-04 16:05:21,095 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0cadffd55815953137b91cfaaef076b5]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA0cadffd55815953137b91cfaaef076b5.mp3?v=1
+2025-09-04 16:05:21,096 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0cadffd55815953137b91cfaaef076b5]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA0cadffd55815953137b91cfaaef076b5.mp3?v=1 with callback tracking
+2025-09-04 16:05:22,062 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA0cadffd55815953137b91cfaaef076b5 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 16:05:22,671 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA0cadffd55815953137b91cfaaef076b5 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 16:05:41,951 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0cadffd55815953137b91cfaaef076b5]: ElevenLabs TTS generated successfully: 70680 bytes
+2025-09-04 19:16:13,224 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA81b9f33bf3c7ae63ce03c1ec3253a8d6]: ElevenLabs TTS generated successfully: 158033 bytes
+2025-09-04 19:16:13,233 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA81b9f33bf3c7ae63ce03c1ec3253a8d6]: TTS audio generated successfully: 158033 bytes
+2025-09-04 19:16:13,236 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA81b9f33bf3c7ae63ce03c1ec3253a8d6]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA81b9f33bf3c7ae63ce03c1ec3253a8d6.mp3?v=1
+2025-09-04 19:16:13,248 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA81b9f33bf3c7ae63ce03c1ec3253a8d6]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA81b9f33bf3c7ae63ce03c1ec3253a8d6.mp3?v=1 with callback tracking
+2025-09-04 19:16:14,782 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA81b9f33bf3c7ae63ce03c1ec3253a8d6 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 19:16:15,368 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA81b9f33bf3c7ae63ce03c1ec3253a8d6 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 19:16:35,356 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA81b9f33bf3c7ae63ce03c1ec3253a8d6]: ElevenLabs TTS generated successfully: 72769 bytes
+2025-09-04 19:17:00,382 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6c26dc7e707233fb9ee23216ca82b26b]: ElevenLabs TTS generated successfully: 146330 bytes
+2025-09-04 19:17:00,382 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6c26dc7e707233fb9ee23216ca82b26b]: TTS audio generated successfully: 146330 bytes
+2025-09-04 19:17:00,383 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6c26dc7e707233fb9ee23216ca82b26b]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA6c26dc7e707233fb9ee23216ca82b26b.mp3?v=1
+2025-09-04 19:17:00,383 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6c26dc7e707233fb9ee23216ca82b26b]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA6c26dc7e707233fb9ee23216ca82b26b.mp3?v=1 with callback tracking
+2025-09-04 19:17:00,939 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA6c26dc7e707233fb9ee23216ca82b26b - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 19:17:01,441 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA6c26dc7e707233fb9ee23216ca82b26b - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 19:17:19,431 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA6c26dc7e707233fb9ee23216ca82b26b]: ElevenLabs TTS generated successfully: 73605 bytes
+2025-09-04 19:18:54,541 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb151ca2cffa4707de7a0da6309319b58]: ElevenLabs TTS generated successfully: 156779 bytes
+2025-09-04 19:18:54,542 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb151ca2cffa4707de7a0da6309319b58]: TTS audio generated successfully: 156779 bytes
+2025-09-04 19:18:54,542 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb151ca2cffa4707de7a0da6309319b58]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAb151ca2cffa4707de7a0da6309319b58.mp3?v=1
+2025-09-04 19:18:54,543 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb151ca2cffa4707de7a0da6309319b58]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAb151ca2cffa4707de7a0da6309319b58.mp3?v=1 with callback tracking
+2025-09-04 19:18:55,493 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAb151ca2cffa4707de7a0da6309319b58 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 19:18:55,947 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAb151ca2cffa4707de7a0da6309319b58 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 19:19:15,963 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb151ca2cffa4707de7a0da6309319b58]: ElevenLabs TTS generated successfully: 69844 bytes
+2025-09-04 19:23:46,083 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA188f329cde4ba3751178033950eb7669]: ElevenLabs TTS generated successfully: 155107 bytes
+2025-09-04 19:23:46,084 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA188f329cde4ba3751178033950eb7669]: TTS audio generated successfully: 155107 bytes
+2025-09-04 19:23:46,085 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA188f329cde4ba3751178033950eb7669]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA188f329cde4ba3751178033950eb7669.mp3?v=1
+2025-09-04 19:23:46,085 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA188f329cde4ba3751178033950eb7669]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA188f329cde4ba3751178033950eb7669.mp3?v=1 with callback tracking
+2025-09-04 19:23:47,043 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA188f329cde4ba3751178033950eb7669 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 19:23:47,589 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA188f329cde4ba3751178033950eb7669 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 19:24:06,460 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA188f329cde4ba3751178033950eb7669]: ElevenLabs TTS generated successfully: 74023 bytes
+2025-09-04 19:30:51,941 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2cf8912d3a738004a677ffaa4c4664f7]: ElevenLabs TTS generated successfully: 152182 bytes
+2025-09-04 19:30:51,942 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2cf8912d3a738004a677ffaa4c4664f7]: TTS audio generated successfully: 152182 bytes
+2025-09-04 19:30:51,942 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2cf8912d3a738004a677ffaa4c4664f7]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA2cf8912d3a738004a677ffaa4c4664f7.mp3?v=1
+2025-09-04 19:30:51,943 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2cf8912d3a738004a677ffaa4c4664f7]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA2cf8912d3a738004a677ffaa4c4664f7.mp3?v=1 with callback tracking
+2025-09-04 19:30:53,021 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA2cf8912d3a738004a677ffaa4c4664f7 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 19:30:53,628 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA2cf8912d3a738004a677ffaa4c4664f7 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 19:31:12,427 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2cf8912d3a738004a677ffaa4c4664f7]: ElevenLabs TTS generated successfully: 73605 bytes
+2025-09-04 19:31:16,700 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2cf8912d3a738004a677ffaa4c4664f7]: ElevenLabs TTS generated successfully: 73605 bytes
+2025-09-04 19:31:27,829 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA2cf8912d3a738004a677ffaa4c4664f7]: ElevenLabs TTS generated successfully: 72769 bytes
+2025-09-04 19:57:10,848 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA45914df2f0a89642c7ff5ef30881cfc6]: ElevenLabs TTS generated successfully: 155107 bytes
+2025-09-04 19:57:10,850 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA45914df2f0a89642c7ff5ef30881cfc6]: TTS audio generated successfully: 155107 bytes
+2025-09-04 19:57:10,850 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA45914df2f0a89642c7ff5ef30881cfc6]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA45914df2f0a89642c7ff5ef30881cfc6.mp3?v=1
+2025-09-04 19:57:10,851 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA45914df2f0a89642c7ff5ef30881cfc6]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA45914df2f0a89642c7ff5ef30881cfc6.mp3?v=1 with callback tracking
+2025-09-04 19:57:12,150 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA45914df2f0a89642c7ff5ef30881cfc6 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 19:57:12,795 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA45914df2f0a89642c7ff5ef30881cfc6 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 19:57:31,757 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA45914df2f0a89642c7ff5ef30881cfc6]: ElevenLabs TTS generated successfully: 71934 bytes
+2025-09-04 19:57:34,698 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA45914df2f0a89642c7ff5ef30881cfc6]: ElevenLabs TTS generated successfully: 77367 bytes
+2025-09-04 19:57:49,755 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA45914df2f0a89642c7ff5ef30881cfc6]: ElevenLabs TTS generated successfully: 74859 bytes
+2025-09-04 20:03:08,209 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28794a1240977772a107da557a5b08ce]: ElevenLabs TTS generated successfully: 155107 bytes
+2025-09-04 20:03:08,211 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28794a1240977772a107da557a5b08ce]: TTS audio generated successfully: 155107 bytes
+2025-09-04 20:03:08,212 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28794a1240977772a107da557a5b08ce]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA28794a1240977772a107da557a5b08ce.mp3?v=1
+2025-09-04 20:03:08,213 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28794a1240977772a107da557a5b08ce]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA28794a1240977772a107da557a5b08ce.mp3?v=1 with callback tracking
+2025-09-04 20:03:09,246 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA28794a1240977772a107da557a5b08ce - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:03:09,834 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA28794a1240977772a107da557a5b08ce - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:03:30,040 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28794a1240977772a107da557a5b08ce]: ElevenLabs TTS generated successfully: 75695 bytes
+2025-09-04 20:03:34,395 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28794a1240977772a107da557a5b08ce]: ElevenLabs TTS generated successfully: 69844 bytes
+2025-09-04 20:07:26,159 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAc63d86beaa05fbca42eed7a4252c1a2f]: ElevenLabs TTS generated successfully: 152182 bytes
+2025-09-04 20:07:26,160 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAc63d86beaa05fbca42eed7a4252c1a2f]: TTS audio generated successfully: 152182 bytes
+2025-09-04 20:07:26,161 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAc63d86beaa05fbca42eed7a4252c1a2f]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAc63d86beaa05fbca42eed7a4252c1a2f.mp3?v=1
+2025-09-04 20:07:26,161 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAc63d86beaa05fbca42eed7a4252c1a2f]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAc63d86beaa05fbca42eed7a4252c1a2f.mp3?v=1 with callback tracking
+2025-09-04 20:07:27,194 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAc63d86beaa05fbca42eed7a4252c1a2f - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:07:27,805 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAc63d86beaa05fbca42eed7a4252c1a2f - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:07:47,769 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAc63d86beaa05fbca42eed7a4252c1a2f]: ElevenLabs TTS generated successfully: 72769 bytes
+2025-09-04 20:12:58,792 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b50a01311734bbea7a75c340a3a8aa0]: ElevenLabs TTS generated successfully: 147584 bytes
+2025-09-04 20:12:58,793 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b50a01311734bbea7a75c340a3a8aa0]: TTS audio generated successfully: 147584 bytes
+2025-09-04 20:12:58,795 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b50a01311734bbea7a75c340a3a8aa0]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA3b50a01311734bbea7a75c340a3a8aa0.mp3?v=1
+2025-09-04 20:12:58,795 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b50a01311734bbea7a75c340a3a8aa0]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA3b50a01311734bbea7a75c340a3a8aa0.mp3?v=1 with callback tracking
+2025-09-04 20:12:59,769 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA3b50a01311734bbea7a75c340a3a8aa0 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:13:00,196 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA3b50a01311734bbea7a75c340a3a8aa0 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:13:18,065 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3b50a01311734bbea7a75c340a3a8aa0]: ElevenLabs TTS generated successfully: 71934 bytes
+2025-09-04 20:19:55,456 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb4147682ac2240c939d365ee9a07c1b2]: ElevenLabs TTS generated successfully: 150092 bytes
+2025-09-04 20:19:55,458 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb4147682ac2240c939d365ee9a07c1b2]: TTS audio generated successfully: 150092 bytes
+2025-09-04 20:19:55,459 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb4147682ac2240c939d365ee9a07c1b2]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAb4147682ac2240c939d365ee9a07c1b2.mp3?v=1
+2025-09-04 20:19:55,459 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb4147682ac2240c939d365ee9a07c1b2]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAb4147682ac2240c939d365ee9a07c1b2.mp3?v=1 with callback tracking
+2025-09-04 20:19:56,557 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAb4147682ac2240c939d365ee9a07c1b2 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:19:56,914 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAb4147682ac2240c939d365ee9a07c1b2 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:20:22,009 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb4147682ac2240c939d365ee9a07c1b2]: ElevenLabs TTS generated successfully: 72769 bytes
+2025-09-04 20:22:20,344 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1b20d302638d2a0070bbfedfa70e3423]: ElevenLabs TTS generated successfully: 149256 bytes
+2025-09-04 20:22:20,346 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1b20d302638d2a0070bbfedfa70e3423]: TTS audio generated successfully: 149256 bytes
+2025-09-04 20:22:20,347 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1b20d302638d2a0070bbfedfa70e3423]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA1b20d302638d2a0070bbfedfa70e3423.mp3?v=1
+2025-09-04 20:22:20,348 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1b20d302638d2a0070bbfedfa70e3423]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA1b20d302638d2a0070bbfedfa70e3423.mp3?v=1 with callback tracking
+2025-09-04 20:22:20,753 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA1b20d302638d2a0070bbfedfa70e3423 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:22:21,094 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA1b20d302638d2a0070bbfedfa70e3423 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:22:38,362 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1b20d302638d2a0070bbfedfa70e3423]: ElevenLabs TTS generated successfully: 74859 bytes
+2025-09-04 20:22:40,762 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1b20d302638d2a0070bbfedfa70e3423]: ElevenLabs TTS generated successfully: 71934 bytes
+2025-09-04 20:30:23,916 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb06afed954b0aa1ad2ccd4cc7f371615]: ElevenLabs TTS generated successfully: 157615 bytes
+2025-09-04 20:30:23,917 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb06afed954b0aa1ad2ccd4cc7f371615]: TTS audio generated successfully: 157615 bytes
+2025-09-04 20:30:23,917 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb06afed954b0aa1ad2ccd4cc7f371615]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAb06afed954b0aa1ad2ccd4cc7f371615.mp3?v=1
+2025-09-04 20:30:23,918 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb06afed954b0aa1ad2ccd4cc7f371615]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAb06afed954b0aa1ad2ccd4cc7f371615.mp3?v=1 with callback tracking
+2025-09-04 20:30:25,147 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAb06afed954b0aa1ad2ccd4cc7f371615 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:30:25,705 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAb06afed954b0aa1ad2ccd4cc7f371615 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:30:43,612 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb06afed954b0aa1ad2ccd4cc7f371615]: ElevenLabs TTS generated successfully: 75695 bytes
+2025-09-04 20:32:17,482 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0f7f35ddf4a30c55a2dc6fb115769c65]: ElevenLabs TTS generated successfully: 148420 bytes
+2025-09-04 20:32:17,484 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0f7f35ddf4a30c55a2dc6fb115769c65]: TTS audio generated successfully: 148420 bytes
+2025-09-04 20:32:17,485 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0f7f35ddf4a30c55a2dc6fb115769c65]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA0f7f35ddf4a30c55a2dc6fb115769c65.mp3?v=1
+2025-09-04 20:32:17,487 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0f7f35ddf4a30c55a2dc6fb115769c65]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA0f7f35ddf4a30c55a2dc6fb115769c65.mp3?v=1 with callback tracking
+2025-09-04 20:32:17,961 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA0f7f35ddf4a30c55a2dc6fb115769c65 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:32:18,523 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA0f7f35ddf4a30c55a2dc6fb115769c65 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:32:36,848 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0f7f35ddf4a30c55a2dc6fb115769c65]: ElevenLabs TTS generated successfully: 73605 bytes
+2025-09-04 20:32:45,799 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0f7f35ddf4a30c55a2dc6fb115769c65]: ElevenLabs TTS generated successfully: 74023 bytes
+2025-09-04 20:34:00,463 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA73563f118ab8f6b97824e19afb164b1a]: ElevenLabs TTS generated successfully: 153854 bytes
+2025-09-04 20:34:00,464 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA73563f118ab8f6b97824e19afb164b1a]: TTS audio generated successfully: 153854 bytes
+2025-09-04 20:34:00,467 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA73563f118ab8f6b97824e19afb164b1a]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA73563f118ab8f6b97824e19afb164b1a.mp3?v=1
+2025-09-04 20:34:00,471 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA73563f118ab8f6b97824e19afb164b1a]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA73563f118ab8f6b97824e19afb164b1a.mp3?v=1 with callback tracking
+2025-09-04 20:34:00,868 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA73563f118ab8f6b97824e19afb164b1a - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:34:01,183 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA73563f118ab8f6b97824e19afb164b1a - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:34:19,969 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA73563f118ab8f6b97824e19afb164b1a]: ElevenLabs TTS generated successfully: 69844 bytes
+2025-09-04 20:34:22,953 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA73563f118ab8f6b97824e19afb164b1a]: ElevenLabs TTS generated successfully: 75695 bytes
+2025-09-04 20:44:58,370 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0400188bdb5b70340b0199062fec0f71]: ElevenLabs TTS generated successfully: 153018 bytes
+2025-09-04 20:44:58,372 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0400188bdb5b70340b0199062fec0f71]: TTS audio generated successfully: 153018 bytes
+2025-09-04 20:44:58,372 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0400188bdb5b70340b0199062fec0f71]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA0400188bdb5b70340b0199062fec0f71.mp3?v=1
+2025-09-04 20:44:58,372 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0400188bdb5b70340b0199062fec0f71]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA0400188bdb5b70340b0199062fec0f71.mp3?v=1 with callback tracking
+2025-09-04 20:44:59,386 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA0400188bdb5b70340b0199062fec0f71 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:44:59,935 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA0400188bdb5b70340b0199062fec0f71 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:45:20,653 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0400188bdb5b70340b0199062fec0f71]: ElevenLabs TTS generated successfully: 51871 bytes
+2025-09-04 20:45:24,132 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA0400188bdb5b70340b0199062fec0f71]: ElevenLabs TTS generated successfully: 71934 bytes
+2025-09-04 20:45:48,480 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA98f17cc53c5310c9c9a339ef65e8801f]: ElevenLabs TTS generated successfully: 147584 bytes
+2025-09-04 20:45:48,481 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA98f17cc53c5310c9c9a339ef65e8801f]: TTS audio generated successfully: 147584 bytes
+2025-09-04 20:45:48,482 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA98f17cc53c5310c9c9a339ef65e8801f]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA98f17cc53c5310c9c9a339ef65e8801f.mp3?v=1
+2025-09-04 20:45:48,484 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA98f17cc53c5310c9c9a339ef65e8801f]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA98f17cc53c5310c9c9a339ef65e8801f.mp3?v=1 with callback tracking
+2025-09-04 20:45:48,971 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA98f17cc53c5310c9c9a339ef65e8801f - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 20:45:49,444 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA98f17cc53c5310c9c9a339ef65e8801f - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 20:46:07,045 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA98f17cc53c5310c9c9a339ef65e8801f]: ElevenLabs TTS generated successfully: 52707 bytes
+2025-09-04 20:46:15,438 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA98f17cc53c5310c9c9a339ef65e8801f]: ElevenLabs TTS generated successfully: 76531 bytes
+2025-09-04 21:16:02,108 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3a5c4121638a31658754a9a3f92fe476]: ElevenLabs TTS generated successfully: 149256 bytes
+2025-09-04 21:16:02,110 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3a5c4121638a31658754a9a3f92fe476]: TTS audio generated successfully: 149256 bytes
+2025-09-04 21:16:02,111 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3a5c4121638a31658754a9a3f92fe476]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA3a5c4121638a31658754a9a3f92fe476.mp3?v=1
+2025-09-04 21:16:02,113 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3a5c4121638a31658754a9a3f92fe476]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA3a5c4121638a31658754a9a3f92fe476.mp3?v=1 with callback tracking
+2025-09-04 21:16:03,737 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA3a5c4121638a31658754a9a3f92fe476 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 21:16:05,303 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA3a5c4121638a31658754a9a3f92fe476 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 21:16:25,786 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3a5c4121638a31658754a9a3f92fe476]: ElevenLabs TTS generated successfully: 44348 bytes
+2025-09-04 21:23:47,587 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA95c6065019b20bbec588f8be6c144e17]: ElevenLabs TTS generated successfully: 155943 bytes
+2025-09-04 21:23:47,589 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA95c6065019b20bbec588f8be6c144e17]: TTS audio generated successfully: 155943 bytes
+2025-09-04 21:23:47,592 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA95c6065019b20bbec588f8be6c144e17]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA95c6065019b20bbec588f8be6c144e17.mp3?v=1
+2025-09-04 21:23:47,594 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA95c6065019b20bbec588f8be6c144e17]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA95c6065019b20bbec588f8be6c144e17.mp3?v=1 with callback tracking
+2025-09-04 21:23:48,550 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA95c6065019b20bbec588f8be6c144e17 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 21:23:50,043 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA95c6065019b20bbec588f8be6c144e17 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 21:24:13,050 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA95c6065019b20bbec588f8be6c144e17]: ElevenLabs TTS generated successfully: 64410 bytes
+2025-09-04 21:24:17,822 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA95c6065019b20bbec588f8be6c144e17]: ElevenLabs TTS generated successfully: 74023 bytes
+2025-09-04 21:42:08,567 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA7ce794442c5074d2bb77d6d539274c27]: ElevenLabs TTS generated successfully: 153854 bytes
+2025-09-04 21:42:08,568 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA7ce794442c5074d2bb77d6d539274c27]: TTS audio generated successfully: 153854 bytes
+2025-09-04 21:42:08,569 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA7ce794442c5074d2bb77d6d539274c27]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA7ce794442c5074d2bb77d6d539274c27.mp3?v=1
+2025-09-04 21:42:08,569 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA7ce794442c5074d2bb77d6d539274c27]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA7ce794442c5074d2bb77d6d539274c27.mp3?v=1 with callback tracking
+2025-09-04 21:42:09,633 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA7ce794442c5074d2bb77d6d539274c27 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 21:42:10,503 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA7ce794442c5074d2bb77d6d539274c27 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 21:42:27,953 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA7ce794442c5074d2bb77d6d539274c27]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:42:29,937 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA7ce794442c5074d2bb77d6d539274c27]: OpenAI TTS generated successfully: 106080 bytes
+2025-09-04 21:49:39,616 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAb83620890ab4b8c4915041921a7a4b33]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 168 credits are required for this request."}}
+2025-09-04 21:49:41,935 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb83620890ab4b8c4915041921a7a4b33]: OpenAI TTS generated successfully: 196320 bytes
+2025-09-04 21:49:41,938 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb83620890ab4b8c4915041921a7a4b33]: TTS audio generated successfully: 196320 bytes
+2025-09-04 21:49:41,938 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb83620890ab4b8c4915041921a7a4b33]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAb83620890ab4b8c4915041921a7a4b33.mp3?v=1
+2025-09-04 21:49:41,939 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAb83620890ab4b8c4915041921a7a4b33]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAb83620890ab4b8c4915041921a7a4b33.mp3?v=1 with callback tracking
+2025-09-04 21:49:43,164 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAb83620890ab4b8c4915041921a7a4b33 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 21:49:44,057 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAb83620890ab4b8c4915041921a7a4b33 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 21:51:10,142 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 168 credits are required for this request."}}
+2025-09-04 21:51:12,562 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 206400 bytes
+2025-09-04 21:51:12,562 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: TTS audio generated successfully: 206400 bytes
+2025-09-04 21:51:12,563 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAdef57efdae4ca5d7c6386deda7a1e821.mp3?v=1
+2025-09-04 21:51:12,565 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAdef57efdae4ca5d7c6386deda7a1e821.mp3?v=1 with callback tracking
+2025-09-04 21:51:13,274 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAdef57efdae4ca5d7c6386deda7a1e821 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-04 21:51:13,575 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAdef57efdae4ca5d7c6386deda7a1e821 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-04 21:51:35,630 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:51:37,034 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 105120 bytes
+2025-09-04 21:52:20,517 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:52:22,236 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 90720 bytes
+2025-09-04 21:52:39,838 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:52:41,839 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 104640 bytes
+2025-09-04 21:52:41,980 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:52:43,743 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 108960 bytes
+2025-09-04 21:53:02,791 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:53:04,729 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 108480 bytes
+2025-09-04 21:53:06,443 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:53:07,997 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 101760 bytes
+2025-09-04 21:53:14,051 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:53:15,857 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 109920 bytes
+2025-09-04 21:53:22,601 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdef57efdae4ca5d7c6386deda7a1e821]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-04 21:53:25,593 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdef57efdae4ca5d7c6386deda7a1e821]: OpenAI TTS generated successfully: 100320 bytes
+2025-09-05 11:15:18,259 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAcd7bb6d307c1d278d8dc7963dc8ca284]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 168 credits are required for this request."}}
+2025-09-05 11:15:22,051 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAcd7bb6d307c1d278d8dc7963dc8ca284]: OpenAI TTS generated successfully: 200640 bytes
+2025-09-05 11:15:22,051 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAcd7bb6d307c1d278d8dc7963dc8ca284]: TTS audio generated successfully: 200640 bytes
+2025-09-05 11:15:22,054 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAcd7bb6d307c1d278d8dc7963dc8ca284]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAcd7bb6d307c1d278d8dc7963dc8ca284.mp3?v=1
+2025-09-05 11:15:22,059 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAcd7bb6d307c1d278d8dc7963dc8ca284]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAcd7bb6d307c1d278d8dc7963dc8ca284.mp3?v=1 with callback tracking
+2025-09-05 11:15:23,418 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAcd7bb6d307c1d278d8dc7963dc8ca284 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 11:15:24,112 - CALL_EVENT - INFO - 🌙 After-Hours Call AFTER_HOURS - Call CAcd7bb6d307c1d278d8dc7963dc8ca284 - {'from': '+19404656984', 'after_hours': 'true', 'notes': 'After-hours salon call received'}
+2025-09-05 11:15:24,596 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAcd7bb6d307c1d278d8dc7963dc8ca284 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 11:15:43,592 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAcd7bb6d307c1d278d8dc7963dc8ca284]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 11:15:46,936 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAcd7bb6d307c1d278d8dc7963dc8ca284]: OpenAI TTS generated successfully: 101760 bytes
+2025-09-05 11:16:01,941 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAcd7bb6d307c1d278d8dc7963dc8ca284]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 11:16:04,440 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAcd7bb6d307c1d278d8dc7963dc8ca284]: OpenAI TTS generated successfully: 108960 bytes
+2025-09-05 11:16:16,605 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAcd7bb6d307c1d278d8dc7963dc8ca284]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 85 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 11:16:17,946 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAcd7bb6d307c1d278d8dc7963dc8ca284]: OpenAI TTS generated successfully: 107520 bytes
+2025-09-05 13:48:15,354 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA28270f148670c07f541fcca68258e38c]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 168 credits are required for this request."}}
+2025-09-05 13:48:17,984 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28270f148670c07f541fcca68258e38c]: OpenAI TTS generated successfully: 209280 bytes
+2025-09-05 13:48:17,984 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28270f148670c07f541fcca68258e38c]: TTS audio generated successfully: 209280 bytes
+2025-09-05 13:48:17,985 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28270f148670c07f541fcca68258e38c]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA28270f148670c07f541fcca68258e38c.mp3?v=1
+2025-09-05 13:48:17,986 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28270f148670c07f541fcca68258e38c]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA28270f148670c07f541fcca68258e38c.mp3?v=1 with callback tracking
+2025-09-05 13:48:19,074 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA28270f148670c07f541fcca68258e38c - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 13:48:19,971 - CALL_EVENT - INFO - 🌙 After-Hours Call AFTER_HOURS - Call CA28270f148670c07f541fcca68258e38c - {'from': '+19404656984', 'after_hours': 'true', 'notes': 'After-hours salon call received'}
+2025-09-05 13:48:20,240 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA28270f148670c07f541fcca68258e38c - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 13:49:08,605 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA28270f148670c07f541fcca68258e38c]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 13:49:10,275 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA28270f148670c07f541fcca68258e38c]: OpenAI TTS generated successfully: 98880 bytes
+2025-09-05 19:12:32,857 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 168 credits are required for this request."}}
+2025-09-05 19:12:35,511 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: OpenAI TTS generated successfully: 201600 bytes
+2025-09-05 19:12:35,512 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: TTS audio generated successfully: 201600 bytes
+2025-09-05 19:12:35,512 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA3d9a2d8a5ae6e3d68356f2d16a9f966b.mp3?v=1
+2025-09-05 19:12:35,512 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA3d9a2d8a5ae6e3d68356f2d16a9f966b.mp3?v=1 with callback tracking
+2025-09-05 19:12:36,660 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA3d9a2d8a5ae6e3d68356f2d16a9f966b - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 19:12:37,309 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA3d9a2d8a5ae6e3d68356f2d16a9f966b - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 19:13:23,512 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:13:27,775 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: OpenAI TTS generated successfully: 108480 bytes
+2025-09-05 19:14:10,871 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:14:12,888 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: OpenAI TTS generated successfully: 111360 bytes
+2025-09-05 19:14:13,737 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:14:15,921 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: OpenAI TTS generated successfully: 104160 bytes
+2025-09-05 19:14:43,607 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:14:45,442 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: OpenAI TTS generated successfully: 110400 bytes
+2025-09-05 19:14:55,989 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:14:58,521 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA3d9a2d8a5ae6e3d68356f2d16a9f966b]: OpenAI TTS generated successfully: 112320 bytes
+2025-09-05 19:27:20,938 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAa379a559787872141b131ab6c57140da]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 168 credits are required for this request."}}
+2025-09-05 19:27:24,716 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAa379a559787872141b131ab6c57140da]: OpenAI TTS generated successfully: 191520 bytes
+2025-09-05 19:27:24,717 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAa379a559787872141b131ab6c57140da]: TTS audio generated successfully: 191520 bytes
+2025-09-05 19:27:24,717 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAa379a559787872141b131ab6c57140da]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAa379a559787872141b131ab6c57140da.mp3?v=1
+2025-09-05 19:27:24,718 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAa379a559787872141b131ab6c57140da]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAa379a559787872141b131ab6c57140da.mp3?v=1 with callback tracking
+2025-09-05 19:27:25,629 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAa379a559787872141b131ab6c57140da - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 19:27:26,241 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAa379a559787872141b131ab6c57140da - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 19:27:48,018 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAdb9549fc22f3e5c06e5858114366def3]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 168 credits are required for this request."}}
+2025-09-05 19:27:50,263 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdb9549fc22f3e5c06e5858114366def3]: OpenAI TTS generated successfully: 202560 bytes
+2025-09-05 19:27:50,264 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdb9549fc22f3e5c06e5858114366def3]: TTS audio generated successfully: 202560 bytes
+2025-09-05 19:27:50,264 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdb9549fc22f3e5c06e5858114366def3]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAdb9549fc22f3e5c06e5858114366def3.mp3?v=1
+2025-09-05 19:27:50,265 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAdb9549fc22f3e5c06e5858114366def3]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAdb9549fc22f3e5c06e5858114366def3.mp3?v=1 with callback tracking
+2025-09-05 19:27:51,108 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAdb9549fc22f3e5c06e5858114366def3 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 19:27:51,614 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAdb9549fc22f3e5c06e5858114366def3 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 19:28:12,024 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAa379a559787872141b131ab6c57140da]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:28:14,477 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAa379a559787872141b131ab6c57140da]: OpenAI TTS generated successfully: 101280 bytes
+2025-09-05 19:28:44,934 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAa379a559787872141b131ab6c57140da]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:28:51,636 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAa379a559787872141b131ab6c57140da]: OpenAI TTS generated successfully: 110400 bytes
+2025-09-05 19:29:53,969 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA1c37f90cf86a8da53ce629daa820107e]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 168 credits are required for this request."}}
+2025-09-05 19:29:56,377 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1c37f90cf86a8da53ce629daa820107e]: OpenAI TTS generated successfully: 208320 bytes
+2025-09-05 19:29:56,378 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1c37f90cf86a8da53ce629daa820107e]: TTS audio generated successfully: 208320 bytes
+2025-09-05 19:29:56,378 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1c37f90cf86a8da53ce629daa820107e]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA1c37f90cf86a8da53ce629daa820107e.mp3?v=1
+2025-09-05 19:29:56,379 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1c37f90cf86a8da53ce629daa820107e]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA1c37f90cf86a8da53ce629daa820107e.mp3?v=1 with callback tracking
+2025-09-05 19:29:57,387 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA1c37f90cf86a8da53ce629daa820107e - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 19:29:57,388 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA1c37f90cf86a8da53ce629daa820107e - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 19:30:45,349 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA1c37f90cf86a8da53ce629daa820107e]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:30:47,742 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1c37f90cf86a8da53ce629daa820107e]: OpenAI TTS generated successfully: 101760 bytes
+2025-09-05 19:31:18,598 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA1c37f90cf86a8da53ce629daa820107e]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:31:20,932 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA1c37f90cf86a8da53ce629daa820107e]: OpenAI TTS generated successfully: 110880 bytes
+2025-09-05 19:31:46,249 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAd70a63a65c11616eac9b1e8de01f375b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 168 credits are required for this request."}}
+2025-09-05 19:31:51,490 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd70a63a65c11616eac9b1e8de01f375b]: OpenAI TTS generated successfully: 200160 bytes
+2025-09-05 19:31:51,491 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd70a63a65c11616eac9b1e8de01f375b]: TTS audio generated successfully: 200160 bytes
+2025-09-05 19:31:51,492 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd70a63a65c11616eac9b1e8de01f375b]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CAd70a63a65c11616eac9b1e8de01f375b.mp3?v=1
+2025-09-05 19:31:51,494 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd70a63a65c11616eac9b1e8de01f375b]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CAd70a63a65c11616eac9b1e8de01f375b.mp3?v=1 with callback tracking
+2025-09-05 19:31:52,810 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAd70a63a65c11616eac9b1e8de01f375b - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 19:31:52,899 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAd70a63a65c11616eac9b1e8de01f375b - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 19:32:38,486 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAd70a63a65c11616eac9b1e8de01f375b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:32:39,853 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd70a63a65c11616eac9b1e8de01f375b]: OpenAI TTS generated successfully: 108000 bytes
+2025-09-05 19:33:19,082 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAd70a63a65c11616eac9b1e8de01f375b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:33:21,062 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd70a63a65c11616eac9b1e8de01f375b]: OpenAI TTS generated successfully: 107520 bytes
+2025-09-05 19:33:25,119 - CALL_EVENT - ERROR - ❌ SALON ERROR [CAd70a63a65c11616eac9b1e8de01f375b]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 19:33:26,740 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CAd70a63a65c11616eac9b1e8de01f375b]: OpenAI TTS generated successfully: 108960 bytes
+2025-09-05 20:34:34,010 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA82d8c40f2cd41b4856cb9e4b93e10f67]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 168 credits are required for this request."}}
+2025-09-05 20:34:37,282 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82d8c40f2cd41b4856cb9e4b93e10f67]: OpenAI TTS generated successfully: 206400 bytes
+2025-09-05 20:34:37,284 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82d8c40f2cd41b4856cb9e4b93e10f67]: TTS audio generated successfully: 206400 bytes
+2025-09-05 20:34:37,285 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82d8c40f2cd41b4856cb9e4b93e10f67]: TTS URL generated: https://e3f4703c54c0.ngrok-free.app/tts/CA82d8c40f2cd41b4856cb9e4b93e10f67.mp3?v=1
+2025-09-05 20:34:37,286 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82d8c40f2cd41b4856cb9e4b93e10f67]: TTS <Play> added to TwiML for: https://e3f4703c54c0.ngrok-free.app/tts/CA82d8c40f2cd41b4856cb9e4b93e10f67.mp3?v=1 with callback tracking
+2025-09-05 20:34:38,160 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA82d8c40f2cd41b4856cb9e4b93e10f67 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 20:34:38,161 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA82d8c40f2cd41b4856cb9e4b93e10f67 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 20:35:26,293 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA82d8c40f2cd41b4856cb9e4b93e10f67]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 20:35:28,129 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82d8c40f2cd41b4856cb9e4b93e10f67]: OpenAI TTS generated successfully: 111840 bytes
+2025-09-05 20:35:58,779 - CALL_EVENT - ERROR - ❌ SALON ERROR [CA82d8c40f2cd41b4856cb9e4b93e10f67]: ElevenLabs TTS failed with status 401: {"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 30000. You have 2 credits remaining, while 89 credits are required for this request."}}
+2025-09-05 20:36:00,486 - CALL_EVENT - INFO - ✅ SALON SUCCESS [CA82d8c40f2cd41b4856cb9e4b93e10f67]: OpenAI TTS generated successfully: 108480 bytes
+2025-09-05 20:40:17,033 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA266fce8ed6558c5c466ec445e9df53ae - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 20:40:17,034 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA266fce8ed6558c5c466ec445e9df53ae - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 20:42:16,660 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA7d31476982686305e3dea18abfe545cd - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 20:42:16,660 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA7d31476982686305e3dea18abfe545cd - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 21:06:22,779 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA57894701042ada10150791ed730efa82 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 21:06:22,781 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA57894701042ada10150791ed730efa82 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 21:28:32,649 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA00da7a6f7850dde20bf8b89bd9f40580 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 21:28:32,650 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA00da7a6f7850dde20bf8b89bd9f40580 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 21:28:55,743 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA7b954dbc3c6a106e83f2f65135142d2a - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 21:28:55,743 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA7b954dbc3c6a106e83f2f65135142d2a - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 21:48:52,456 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA4cec8527736ae9ed36582f8913d5792d - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 21:48:52,458 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA4cec8527736ae9ed36582f8913d5792d - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 22:10:59,819 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CAb479756dbb4a4f7bc23f78a3910b7e85 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 22:10:59,821 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CAb479756dbb4a4f7bc23f78a3910b7e85 - {'notes': 'AI stylist now handling salon call - no human forwarding'}
+2025-09-05 22:15:08,674 - CALL_EVENT - INFO - 📞 Salon Call Started INITIATED - Call CA362b88708d2402ffad08671263d1bfe2 - {'from': '+19404656984', 'to': '+18084826296', 'notes': 'Salon call received - AI stylist assigned'}
+2025-09-05 22:15:08,675 - CALL_EVENT - INFO - 🤖 AI Stylist Assigned AI_HANDLING - Call CA362b88708d2402ffad08671263d1bfe2 - {'notes': 'AI stylist now handling salon call - no human forwarding'}

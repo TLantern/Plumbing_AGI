@@ -6,3 +6,7 @@
 python3 scripts/start_salon_analytics.py
 python3 scripts/start_salon_phone.py
 ./scripts/salon_dev.sh
+
+
+python3 scripts/start_salon_phone.py --port 5001 --reload
+

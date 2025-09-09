@@ -19,14 +19,30 @@ from openai import OpenAI
 from collections import defaultdict
 import re
 # Import from the installed package
-from ops_integrations.services.plumbing_services import (
-    get_function_definition,
-    infer_job_type_from_text,
-    infer_multiple_job_types_from_text,
-)
-from ops_integrations.core.job_booking import book_emergency_job, book_scheduled_job 
-from ops_integrations.adapters.external_services.google_calendar import CalendarAdapter
-from ops_integrations.adapters.conversation_manager import ConversationManager
+try:
+    from ..services.plumbing_services import (
+        get_function_definition,
+        infer_job_type_from_text,
+        infer_multiple_job_types_from_text,
+    )
+    from ..core.job_booking import book_emergency_job, book_scheduled_job 
+    from .external_services.google_calendar import CalendarAdapter
+    from .conversation_manager import ConversationManager
+except Exception:
+    import sys as _sys
+    import os as _os
+    _CURRENT_DIR = _os.path.dirname(__file__)
+    _OPS_ROOT = _os.path.abspath(_os.path.join(_CURRENT_DIR, '..'))
+    if _OPS_ROOT not in _sys.path:
+        _sys.path.insert(0, _OPS_ROOT)
+    from ops_integrations.services.plumbing_services import (
+        get_function_definition,
+        infer_job_type_from_text,
+        infer_multiple_job_types_from_text,
+    )
+    from ops_integrations.core.job_booking import book_emergency_job, book_scheduled_job 
+    from ops_integrations.adapters.external_services.google_calendar import CalendarAdapter
+    from ops_integrations.adapters.conversation_manager import ConversationManager
 from datetime import datetime, timedelta, timezone
 try:
     import webrtcvad  # type: ignore
@@ -47,7 +63,13 @@ import httpx
 try:
     from ..prompts.prompt_layer import INTENT_CLASSIFICATION_PROMPT
 except Exception:
-    from prompts.prompt_layer import INTENT_CLASSIFICATION_PROMPT
+    import sys as _sys
+    import os as _os
+    _CURRENT_DIR = _os.path.dirname(__file__)
+    _OPS_ROOT = _os.path.abspath(_os.path.join(_CURRENT_DIR, '..'))
+    if _OPS_ROOT not in _sys.path:
+        _sys.path.insert(0, _OPS_ROOT)
+    from ops_integrations.prompts.prompt_layer import INTENT_CLASSIFICATION_PROMPT
 
 # Try to import audioop for mu-law decoding and resampling; may be missing on some Python versions
 try:
@@ -76,7 +98,7 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: Optional[str] = None  # Set a default in env if desired
     ELEVENLABS_MODEL_ID: Optional[str] = None  # e.g. "eleven_multilingual_v2"
     FORCE_SAY_ONLY: bool = False  # Diagnostics: avoid TTS and use <Say>
-    USE_ELEVENLABS_TTS: bool = True  # Control whether to use ElevenLabs (True) or OpenAI TTS (False)
+    USE_ELEVENLABS_TTS: bool = False  # Control whether to use ElevenLabs (True) or OpenAI TTS (False)
     # OpenAI TTS Configuration
     OPENAI_TTS_SPEED: float = 1.25  # Increased from 1.0 for faster responses (0.25 to 4.0)
     SPEECH_GATE_BUFFER_SEC: float = 1.0  # Buffer time added to TTS duration for speech gate
@@ -408,7 +430,10 @@ async def classify_transcript_intent(text: str) -> tuple[str, float]:
             return "GENERAL_INQUIRY", 0.2
         
         # Validate that the intent is one we recognize
-        from ..flows.intents import get_intent_tags
+        try:
+            from ..flows.intents import get_intent_tags
+        except Exception:
+            from flows.intents import get_intent_tags
         valid_intents = get_intent_tags()
         if intent not in valid_intents:
             logger.debug(f"Unknown intent returned: {intent}, falling back to GENERAL_INQUIRY")
