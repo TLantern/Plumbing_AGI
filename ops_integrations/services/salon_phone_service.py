@@ -57,7 +57,7 @@ try:
     from ops_integrations.adapters.external_services.sheets import GoogleSheetsCRM
     # Set test sheet name for development
     import os
-    os.environ.setdefault("SHEETS_BOOKINGS_TAB_NAME", "test")
+    os.environ.setdefault("SHEETS_BOOKINGS_TAB_NAME", "BookingsBoldwings")
     sheets_crm = GoogleSheetsCRM()
     logging.info(f"📊 Google Sheets CRM initialized: enabled={sheets_crm.enabled}, spreadsheet_id={sheets_crm.spreadsheet_id}, tab_name={sheets_crm.tab_name}")
 except ImportError as e:

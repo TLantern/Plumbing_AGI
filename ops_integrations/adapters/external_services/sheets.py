@@ -210,6 +210,32 @@ class GoogleSheetsCRM:
             return service_price
         return 0.0
 
+    def force_update_headers(self) -> bool:
+        """Force update headers on the BoldwingsBookings sheet with new enhanced metrics columns"""
+        if not self.enabled or not self._service:
+            logging.error("Google Sheets service not enabled")
+            return False
+            
+        try:
+            headers = self._headers()
+            body = {"values": [headers]}
+            
+            # Update the first row with new headers
+            self._service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{self.tab_name}!A1:Q1",
+                valueInputOption="USER_ENTERED",
+                body=body
+            ).execute()
+            
+            logging.info(f"✅ Successfully updated headers on {self.tab_name} sheet with enhanced metrics")
+            logging.info(f"📊 New columns: {', '.join(headers)}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Failed to update headers on {self.tab_name}: {e}")
+            return False
+
     def test_sheets_integration(self) -> Dict[str, Any]:
         """Test function to verify Google Sheets integration with new metrics"""
         test_record = {
