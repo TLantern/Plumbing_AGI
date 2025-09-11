@@ -70,13 +70,9 @@ def check_environment():
         'TWILIO_ACCOUNT_SID',
         'TWILIO_AUTH_TOKEN', 
         'OPENAI_API_KEY',
-        'TWILIO_WEBHOOK_URL_SALON'
+        'PUBLIC_BASE_URL',
+        'WSS_PUBLIC_URL'
     ]
-    
-    # Check for either TWILIO_PHONE_NUMBER or TWILIO_FROM_NUMBER
-    phone_number = os.getenv('TWILIO_PHONE_NUMBER') or os.getenv('TWILIO_FROM_NUMBER')
-    if not phone_number:
-        required_vars.append('TWILIO_PHONE_NUMBER (or TWILIO_FROM_NUMBER)')
     
     missing_vars = []
     for var in required_vars:
@@ -84,17 +80,31 @@ def check_environment():
             missing_vars.append(var)
     
     if missing_vars:
-        print(f"⚠️  Missing environment variables: {', '.join(missing_vars)}")
+        print(f"⚠️  Missing required environment variables: {', '.join(missing_vars)}")
         print("Set them in your .env file or environment")
-        print("Service will start but some features may not work")
+        print("Service will start but ConversationRelay features may not work")
     else:
         print("✅ All required environment variables are set")
     
-    # Optional variables
-    optional_vars = ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']
+    # Optional variables for enhanced features
+    optional_vars = [
+        'CI_SERVICE_SID',  # For Conversational Intelligence analytics
+        'ELEVENLABS_API_KEY',  # For direct ElevenLabs TTS (Twilio handles this now)
+        'ELEVENLABS_VOICE_ID'  # Voice selection for Twilio TTS
+    ]
     for var in optional_vars:
         if not os.getenv(var):
             print(f"ℹ️  Optional variable {var} not set")
+    
+    # Check URL formats
+    public_url = os.getenv('PUBLIC_BASE_URL', '')
+    wss_url = os.getenv('WSS_PUBLIC_URL', '')
+    
+    if public_url and not public_url.startswith('https://'):
+        print(f"⚠️  PUBLIC_BASE_URL should start with https:// (current: {public_url})")
+    
+    if wss_url and not wss_url.startswith('wss://'):
+        print(f"⚠️  WSS_PUBLIC_URL should start with wss:// (current: {wss_url})")
 
 def verify_boldwings_config():
     """Verify Bold Wings service configuration exists"""
@@ -154,14 +164,17 @@ def start_salon_phone_service(host: str = "0.0.0.0", port: int = 5001, reload: b
     try:
         import uvicorn
         
-        print(f"🚀 Starting Bold Wings Salon Phone Service on {host}:{port}")
+        print(f"🚀 Starting Bold Wings Salon Phone Service (ConversationRelay + CI) on {host}:{port}")
         print(f"📞 Twilio webhook URL: http://{host}:{port}/voice")
-        print(f"🎵 Media stream URL: ws://{host}:{port}/media/{{call_sid}}")
+        print(f"🔄 ConversationRelay WebSocket: wss://{host}:{port}/cr")
+        print(f"📝 CI Transcripts webhook: http://{host}:{port}/intelligence/transcripts")
         print(f"📊 Health check: http://{host}:{port}/health")
         print(f"💇‍♀️ Services endpoint: http://{host}:{port}/salon/services")
         print()
         print("🔧 Make sure to configure your Twilio phone number webhook to:")
-        print(f"   http://your-domain.com:{port}/voice")
+        print(f"   https://your-domain.com:{port}/voice")
+        print("🔧 And configure CI transcript webhook to:")
+        print(f"   https://your-domain.com:{port}/intelligence/transcripts")
         
         uvicorn.run(
             "ops_integrations.services.salon_phone_service:app",

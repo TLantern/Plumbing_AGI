@@ -19,6 +19,12 @@ export NEXT_PUBLIC_SALON_API_URL=${NEXT_PUBLIC_SALON_API_URL:-http://localhost:5
 export NEXT_PUBLIC_PHONE_API_URL=${NEXT_PUBLIC_PHONE_API_URL:-http://localhost:5001}
 export SALON_SERVICE_URL=${SALON_SERVICE_URL:-http://localhost:5002}
 
+# ConversationRelay + CI environment variables (required for new service)
+export CI_SERVICE_SID=${CI_SERVICE_SID:-""}
+export PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-"https://your-ngrok-url.ngrok.io"}
+export WSS_PUBLIC_URL=${WSS_PUBLIC_URL:-"wss://your-ngrok-url.ngrok.io"}
+export ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-"kdmDKE6EkgrWrrykO9Qt"}
+
 # Pretty log helper
 log() { echo -e "\033[1;36m[$(date +%H:%M:%S)]\033[0m $*"; }
 
@@ -72,7 +78,8 @@ log "  🖥️  Next.js Dashboard: http://localhost:${SALON_FRONTEND_PORT}/dashb
 log "  💇‍♀️ Salon Dashboard API: http://localhost:${SALON_FRONTEND_PORT}/api/salon-dashboard"
 log "  📊 Analytics Service: http://localhost:${SALON_ANALYTICS_PORT}/salon/dashboard"
 log "  📞 Phone API: http://localhost:${SALON_PHONE_PORT}/health"
-log "  🎵 Media Stream: ws://localhost:${SALON_PHONE_PORT}/media/{call_sid}"
+log "  🔄 ConversationRelay: wss://localhost:${SALON_PHONE_PORT}/cr"
+log "  📝 CI Transcripts: http://localhost:${SALON_PHONE_PORT}/intelligence/transcripts"
 log "  💇‍♀️ Services: http://localhost:${SALON_PHONE_PORT}/salon/services"
 
 # Graceful shutdown
