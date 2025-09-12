@@ -541,7 +541,7 @@ async def setup_location_data_endpoint(location_id: int, website_url: str = None
 @app.get("/location/{location_id}/status")
 async def get_location_data_status(location_id: int):
     """Get current status of location data"""
-    return get_location_status(location_id)
+    return await get_location_status(location_id)
 
 @app.get("/locations")
 async def list_all_locations():
@@ -662,7 +662,7 @@ async def list_all_shops():
         shops = []
         
         for phone_number, location_id in phone_map.items():
-            status = get_location_status(location_id)
+            status = await get_location_status(location_id)
             knowledge = await knowledge_service.get_location_knowledge(location_id)
             
             shops.append({
