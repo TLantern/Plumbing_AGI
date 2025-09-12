@@ -627,7 +627,7 @@ async def get_shop_config(location_id: int):
     """Get complete configuration for a shop"""
     try:
         # Get location data
-        status = get_location_status(location_id)
+        status = await get_location_status(location_id)
         knowledge = await knowledge_service.get_location_knowledge(location_id)
         
         # Find phone number for this location
