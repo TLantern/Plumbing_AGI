@@ -11,3 +11,11 @@ google-auth==2.25.2
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
 requests==2.32.5
+
+# Database dependencies
+sqlalchemy>=2.0.0
+asyncpg>=0.28.0
+psycopg2-binary>=2.9.0
+
+# Supabase integration
+supabase>=2.0.0

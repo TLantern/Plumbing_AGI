@@ -1,0 +1,419 @@
+{
+  "business_name": "SoHo Salon Denton",
+  "website_url": "https://sohosalondenton.glossgenius.com/services",
+  "phone_number": "+18084826296",
+  "location_id": 1,
+  "scraped_at": "2025-09-12T15:45:00Z",
+  "services": [
+    {
+      "name": "Kid's Cuts (10 & Under)",
+      "description": "Includes wash & basic cut. Doesn't include blow-dry.",
+      "price": "$25",
+      "duration": "30 min",
+      "category": "Hair Cuts",
+      "price_cents": 2500,
+      "duration_minutes": 30
+    },
+    {
+      "name": "Women's Cuts",
+      "description": "Wash, cut, and blowout",
+      "price": "$55+",
+      "duration": "60 min",
+      "category": "Hair Cuts",
+      "price_cents": 5500,
+      "duration_minutes": 60
+    },
+    {
+      "name": "Men's Cut",
+      "description": "Clipper cut on sides and scissor cut on top",
+      "price": "$45+",
+      "duration": "45 min",
+      "category": "Hair Cuts",
+      "price_cents": 4500,
+      "duration_minutes": 45
+    },
+    {
+      "name": "Signature Cut",
+      "description": "Wash, cut, blowout with customized style created.",
+      "price": "$70+",
+      "duration": "75 min",
+      "category": "Hair Cuts",
+      "price_cents": 7000,
+      "duration_minutes": 75
+    },
+    {
+      "name": "Bang Trim",
+      "description": "A bang trim is a quick haircut that reshapes and maintains the length and style of fringe or bangs, framing the face.",
+      "price": "$15",
+      "duration": "15 min",
+      "category": "Hair Cuts",
+      "price_cents": 1500,
+      "duration_minutes": 15
+    },
+    {
+      "name": "Formal Updo",
+      "description": "An updo is when the hair is pulled up and styled, perfect for dressing up or special events.",
+      "price": "$60+",
+      "duration": "60 min",
+      "category": "Styling",
+      "price_cents": 6000,
+      "duration_minutes": 60
+    },
+    {
+      "name": "Blowout",
+      "description": "Hair is washed and styled with blow-dryer leaves the hair smooth and bouncy",
+      "price": "$40",
+      "duration": "45 min",
+      "category": "Styling",
+      "price_cents": 4000,
+      "duration_minutes": 45
+    },
+    {
+      "name": "Hot Tool Styling",
+      "description": "Hair is styled using a flat iron or curling iron.",
+      "price": "$30",
+      "duration": "30 min",
+      "category": "Styling",
+      "price_cents": 3000,
+      "duration_minutes": 30
+    },
+    {
+      "name": "Perm",
+      "description": "A perm is a way to add curls or waves to your hair.",
+      "price": "$150+",
+      "duration": "150 min",
+      "category": "Chemical Services",
+      "price_cents": 15000,
+      "duration_minutes": 150,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Scalp And Neck Massage",
+      "description": "20-min head and scalp massage with hair mask",
+      "price": "$25",
+      "duration": "20 min",
+      "category": "Treatments",
+      "price_cents": 2500,
+      "duration_minutes": 20
+    },
+    {
+      "name": "Redken Acidic Bonding Treatment",
+      "description": "A customized treatment that balances hair pH",
+      "price": "$20",
+      "duration": "10 min",
+      "category": "Treatments",
+      "price_cents": 2000,
+      "duration_minutes": 10
+    },
+    {
+      "name": "Keratin Treatment",
+      "description": "A Smoothing and Strengthening protein treatment.",
+      "price": "$310+",
+      "duration": "210 min",
+      "category": "Chemical Services",
+      "price_cents": 31000,
+      "duration_minutes": 210,
+      "deposit_required": "$100.00"
+    },
+    {
+      "name": "Color Consultation",
+      "description": "A color consultation is a chat to plan the perfect hair color for your look and vibe.",
+      "price": "$0",
+      "duration": "15 min",
+      "category": "Consultations",
+      "price_cents": 0,
+      "duration_minutes": 15
+    },
+    {
+      "name": "Color Correction Consultation",
+      "description": "A color correction consultation is a quick chat to figure out how to fix or adjust your hair color to get it looking right again.",
+      "price": "$0",
+      "duration": "15 min",
+      "category": "Consultations",
+      "price_cents": 0,
+      "duration_minutes": 15
+    },
+    {
+      "name": "Color Retouch",
+      "description": "Color new growth between 1/4 inch up to 1 1/2 inches",
+      "price": "$90+",
+      "duration": "90 min",
+      "category": "Color Services",
+      "price_cents": 9000,
+      "duration_minutes": 90,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "All Over Color",
+      "description": "Color hair roots to end.",
+      "price": "$110+",
+      "duration": "105 min",
+      "category": "Color Services",
+      "price_cents": 11000,
+      "duration_minutes": 105,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Blonding Retouch",
+      "description": "Coloring up 1 1/2 inch new growth with a lightener, includes toner.",
+      "price": "$120+",
+      "duration": "105 min",
+      "category": "Color Services",
+      "price_cents": 12000,
+      "duration_minutes": 105,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "All Over Blonding",
+      "description": "Coloring from roots to end with lightener, includes toner.",
+      "price": "$150+",
+      "duration": "135 min",
+      "category": "Color Services",
+      "price_cents": 15000,
+      "duration_minutes": 135,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Accent Highlight",
+      "description": "A touch of highlights that frame the face and around the part (up to 10 foils), includes toner",
+      "price": "$85+",
+      "duration": "90 min",
+      "category": "Highlight Services",
+      "price_cents": 8500,
+      "duration_minutes": 90,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Partial Highlight",
+      "description": "Highlights around the face and crown (up to 20 foils) includes toner",
+      "price": "$130+",
+      "duration": "135 min",
+      "category": "Highlight Services",
+      "price_cents": 13000,
+      "duration_minutes": 135,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Full Highlight",
+      "description": "All-Over Highlight",
+      "price": "$185+",
+      "duration": "180 min",
+      "category": "Highlight Services",
+      "price_cents": 18500,
+      "duration_minutes": 180,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Partial Balayage",
+      "description": "Freehand highlights around the face and crown",
+      "price": "$160+",
+      "duration": "150 min",
+      "category": "Balayage Services",
+      "price_cents": 16000,
+      "duration_minutes": 150,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Full Balayage",
+      "description": "Freehand highlights throughout",
+      "price": "$215+",
+      "duration": "195 min",
+      "category": "Balayage Services",
+      "price_cents": 21500,
+      "duration_minutes": 195,
+      "deposit_required": "$75.00"
+    },
+    {
+      "name": "Gloss Or Toner",
+      "description": "Add shine (clear) or refresh toner",
+      "price": "$65+",
+      "duration": "75 min",
+      "category": "Color Services",
+      "price_cents": 6500,
+      "duration_minutes": 75,
+      "deposit_required": "$30.00"
+    },
+    {
+      "name": "Vivid Fashion Color Add-on",
+      "description": "Add-on to a highlight or bonding service",
+      "price": "$35",
+      "duration": "45 min",
+      "category": "Color Services",
+      "price_cents": 3500,
+      "duration_minutes": 45
+    },
+    {
+      "name": "Vivid Fashion Color Refresh",
+      "description": "Refresh a vivid color",
+      "price": "$65+",
+      "duration": "75 min",
+      "category": "Color Services",
+      "price_cents": 6500,
+      "duration_minutes": 75,
+      "deposit_required": "$30.00"
+    },
+    {
+      "name": "Hair Extension Consultation",
+      "description": "A hair extension consultation is a quick chat to find the best extensions for your style and length.",
+      "price": "$0",
+      "duration": "15 min",
+      "category": "Consultations",
+      "price_cents": 0,
+      "duration_minutes": 15
+    },
+    {
+      "name": "Tribal Braids",
+      "description": "This style typically features cornrows braided along the scalp in creative designs, combined with knotless or feed-in braids that extend past the scalp. Tribal braids are versatile, long-lasting, and serve as a protective style that promotes hair growth while showcasing cultural heritage and personal style.",
+      "price": "$200+",
+      "duration": "160 min",
+      "category": "Braiding Services",
+      "price_cents": 20000,
+      "duration_minutes": 160,
+      "deposit_required": "$100.00"
+    },
+    {
+      "name": "Silk Press",
+      "description": "A silk press is a heat-styling method that straightens natural hair without chemicals, giving it a smooth, shiny, and flowy finish. The process starts with a deep cleanse and conditioning to remove buildup and add moisture. After detangling, a heat protectant is applied, and the hair is blow-dried straight. Then, small sections are flat-ironed using a titanium or ceramic iron to achieve a sleek, polished look. A light serum or oil is added for shine and frizz control. The result is soft, silky hair that moves naturally—mimicking relaxed hair, but without chemical processing.",
+      "price": "$100+",
+      "duration": "150 min",
+      "category": "Natural Hair Services",
+      "price_cents": 10000,
+      "duration_minutes": 150,
+      "deposit_required": "$30.00"
+    },
+    {
+      "name": "Hair Relaxer",
+      "description": "A hair relaxer is a chemical treatment used to permanently straighten tightly coiled or curly hair. The process begins with sectioning the hair and applying a protective base to the scalp. A relaxer cream is then applied to the new growth or entire hair shaft, depending on the need. The product breaks down the hair's natural curl pattern, allowing it to be straightened. After a set processing time, the relaxer is rinsed out thoroughly, followed by a neutralizing shampoo to stop the chemical process and restore the hair's pH balance. The hair is then deep conditioned, dried, and styled. The result is smooth, straight hair that requires touch-ups every 6–8 weeks as new growth appears.",
+      "price": "$140+",
+      "duration": "120 min",
+      "category": "Chemical Services",
+      "price_cents": 14000,
+      "duration_minutes": 120,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Knotless Braids",
+      "description": "Instead of using a tight knot to anchor the braid, the stylist starts braiding with your natural hair and slowly feeds in small pieces of braiding hair as they move down the strand. This creates a smooth transition from natural hair to added hair, resulting in lightweight, flexible braids that are less likely to cause breakage or scalp tension.",
+      "price": "$150+",
+      "duration": "400 min",
+      "category": "Braiding Services",
+      "price_cents": 15000,
+      "duration_minutes": 400,
+      "deposit_required": "$75.00"
+    },
+    {
+      "name": "Stitch Braids",
+      "description": "Stitch braids are a sleek and stylish form of feed-in cornrows that feature clean, defined \"stitch-like\" lines between each braid. The process starts with washing, conditioning, and blow-drying the hair to ensure it's clean and smooth for braiding. Next, the hair is sectioned into clean, straight parts using a rat-tail comb and shine-enhancing gel or edge control. The key to stitch braids is creating sharp horizontal lines (or stitches) across each part. This is done by using your fingers or a comb to separate small sections of hair evenly while braiding. Braiding hair extensions are gradually fed in as the stylist braids close to the scalp, helping to create a fuller, longer braid while keeping the stitch pattern neat and uniform. Stitch braids are known for their crisp, eye-catching look and can be styled in various patterns, sizes, and lengths.",
+      "price": "$120+",
+      "duration": "250 min",
+      "category": "Braiding Services",
+      "price_cents": 12000,
+      "duration_minutes": 250,
+      "deposit_required": "$60.00"
+    },
+    {
+      "name": "Two Strand Twist",
+      "description": "The hair is sectioned into small parts, depending on how thick or thin you want the twists. Each section is split into two equal strands and twisted around each other tightly, working down to the ends. The ends are usually coiled around a finger or sealed with a bit of product to prevent unraveling.",
+      "price": "$75+",
+      "duration": "250 min",
+      "category": "Natural Hair Services",
+      "price_cents": 7500,
+      "duration_minutes": 250,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Extended Ponytail",
+      "description": "An extended long ponytail is a sleek, polished hairstyle that adds dramatic length and volume to a natural ponytail using hair extensions. The look is smooth at the top, with hair slicked back tightly—either in a high, mid, or low ponytail—secured with gel or edge control for a clean, flawless finish. The extension hair is then wrapped or sewn around the base of the ponytail to blend seamlessly with your natural hair. A small piece of hair is usually wrapped around the ponytail base to conceal the band and give a professional, finished look. This style is chic and versatile—perfect for both casual and formal occasions—and can be worn bone-straight, curled, wavy, or even braided. It's ideal for adding instant glam and length while keeping your natural hair protected and tucked away.",
+      "price": "$65+",
+      "duration": "130 min",
+      "category": "Styling",
+      "price_cents": 6500,
+      "duration_minutes": 130,
+      "deposit_required": "$35.00"
+    },
+    {
+      "name": "Corn Row",
+      "description": "The stylist begins braiding the hair flat against the scalp, weaving three strands together and gradually adding small sections of hair as they move along the row. This process is repeated for each part until the desired look is achieved.",
+      "price": "$85+",
+      "duration": "190 min",
+      "category": "Braiding Services",
+      "price_cents": 8500,
+      "duration_minutes": 190,
+      "deposit_required": "$50.00"
+    },
+    {
+      "name": "Kids Braids",
+      "description": "Decorative, custom braids for children under 11 yr old",
+      "price": "$65+",
+      "duration": "130 min",
+      "category": "Kids Services",
+      "price_cents": 6500,
+      "duration_minutes": 130,
+      "deposit_required": "$35.00"
+    },
+    {
+      "name": "Crochet Braids",
+      "description": "The hair is braided into cornrows, usually straight back or in a customized pattern depending on the desired final look. Once the cornrows are complete, a latch hook (crochet needle) is used to insert the looped extensions underneath the cornrows. The hair is then pulled through the loop and tightened to secure it.",
+      "price": "$90+",
+      "duration": "340 min",
+      "category": "Braiding Services",
+      "price_cents": 9000,
+      "duration_minutes": 340,
+      "deposit_required": "$55.00"
+    }
+  ],
+  "service_categories": [
+    "Hair Cuts",
+    "Styling", 
+    "Chemical Services",
+    "Treatments",
+    "Consultations",
+    "Color Services",
+    "Highlight Services",
+    "Balayage Services",
+    "Braiding Services",
+    "Natural Hair Services",
+    "Kids Services"
+  ],
+  "pricing_info": {
+    "most_affordable": {
+      "service": "Color Consultation",
+      "price": "Free"
+    },
+    "signature_services": [
+      {
+        "service": "Signature Cut",
+        "price": "$70+",
+        "description": "Wash, cut, blowout with customized style created"
+      },
+      {
+        "service": "Full Balayage", 
+        "price": "$215+",
+        "description": "Freehand highlights throughout"
+      },
+      {
+        "service": "Silk Press",
+        "price": "$100+", 
+        "description": "Chemical-free hair straightening method"
+      }
+    ],
+    "most_premium": {
+      "service": "Keratin Treatment",
+      "price": "$310+",
+      "description": "Smoothing and Strengthening protein treatment"
+    }
+  },
+  "special_features": [
+    "Buy Now, Pay Later available for $50-$4,000 bookings",
+    "Deposit required for most color and chemical services",
+    "Specialized in both traditional and natural hair services",
+    "Comprehensive braiding and protective styling",
+    "Kids services available"
+  ],
+  "booking_notes": [
+    "Free consultations available for color and extensions",
+    "Deposits required for most services over $50", 
+    "Buy Now, Pay Later options available",
+    "Specializes in natural hair care and protective styles"
+  ]
+}

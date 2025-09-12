@@ -428,3 +428,244 @@
 2025-09-01 14:55:20,905 - watchfiles.main - INFO - 3 changes detected
 2025-09-01 14:55:21,947 - watchfiles.main - INFO - 464 changes detected
 2025-09-01 14:55:22,502 - watchfiles.main - INFO - 173 changes detected
+2025-09-09 16:20:55,527 - voice-intent - INFO - env_loaded
+2025-09-09 16:20:55,554 - voice-intent - INFO - env_loaded
+2025-09-09 16:20:55,557 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 16:20:56,074 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 16:20:56,076 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 16:20:56,114 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 16:20:56,146 - voice-intent - INFO - env_loaded
+2025-09-09 16:20:56,206 - root - INFO - Salon Analytics Service started
+2025-09-09 16:43:30,339 - root - INFO - Salon Analytics Service stopped
+2025-09-09 16:43:49,759 - voice-intent - INFO - env_loaded
+2025-09-09 16:43:49,788 - voice-intent - INFO - env_loaded
+2025-09-09 16:43:49,791 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 16:43:50,323 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 16:43:50,326 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 16:43:50,364 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 16:43:50,396 - voice-intent - INFO - env_loaded
+2025-09-09 16:43:50,443 - root - INFO - Salon Analytics Service started
+2025-09-09 16:45:27,145 - voice-intent - INFO - env_loaded
+2025-09-09 16:45:27,174 - voice-intent - INFO - env_loaded
+2025-09-09 16:45:27,177 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 16:45:28,024 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 16:45:28,031 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 16:45:28,109 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 16:45:28,159 - voice-intent - INFO - env_loaded
+2025-09-09 16:45:32,157 - watchfiles.main - INFO - 17 changes detected
+2025-09-09 16:45:32,526 - watchfiles.main - INFO - 10 changes detected
+2025-09-09 16:45:33,255 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 16:45:33,618 - watchfiles.main - INFO - 6 changes detected
+2025-09-09 16:45:33,983 - watchfiles.main - INFO - 16 changes detected
+2025-09-09 16:45:34,411 - watchfiles.main - INFO - 8 changes detected
+2025-09-09 16:45:34,767 - watchfiles.main - INFO - 16 changes detected
+2025-09-09 16:45:39,940 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:45:40,307 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:46:17,142 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:46:18,472 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:46:34,664 - watchfiles.main - INFO - 19 changes detected
+2025-09-09 16:46:36,056 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:46:55,335 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:46:55,924 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:46:59,816 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:47:05,349 - watchfiles.main - INFO - 6 changes detected
+2025-09-09 16:47:10,416 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:47:14,205 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:48:00,894 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:48:08,540 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 16:48:21,587 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:48:28,144 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 16:49:18,748 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:49:19,272 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:50:39,136 - watchfiles.main - INFO - 8 changes detected
+2025-09-09 16:50:40,198 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:50:40,559 - watchfiles.main - INFO - 10 changes detected
+2025-09-09 16:50:46,263 - watchfiles.main - INFO - 12 changes detected
+2025-09-09 16:50:46,630 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:50:50,998 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:50:51,364 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:51:15,586 - voice-intent - INFO - env_loaded
+2025-09-09 16:51:15,622 - voice-intent - INFO - env_loaded
+2025-09-09 16:51:15,627 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 16:51:16,044 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 16:51:16,048 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 16:51:16,098 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 16:51:16,133 - voice-intent - INFO - env_loaded
+2025-09-09 16:51:16,635 - watchfiles.main - INFO - 10 changes detected
+2025-09-09 16:51:17,214 - watchfiles.main - INFO - 4 changes detected
+2025-09-09 16:51:17,574 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:51:17,990 - watchfiles.main - INFO - 29 changes detected
+2025-09-09 16:51:18,349 - watchfiles.main - INFO - 6 changes detected
+2025-09-09 16:51:18,715 - watchfiles.main - INFO - 8 changes detected
+2025-09-09 16:51:21,529 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 16:51:27,184 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:51:36,764 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:52:13,498 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:52:14,958 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:52:16,904 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:52:18,392 - watchfiles.main - INFO - 16 changes detected
+2025-09-09 16:52:19,514 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:52:19,895 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:52:20,268 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:52:20,628 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:52:22,686 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:52:28,406 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:52:34,487 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:52:35,659 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:52:40,038 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:52:40,397 - watchfiles.main - INFO - 50 changes detected
+2025-09-09 16:52:40,760 - watchfiles.main - INFO - 20 changes detected
+2025-09-09 16:52:41,120 - watchfiles.main - INFO - 11 changes detected
+2025-09-09 16:52:41,756 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 16:52:49,380 - watchfiles.main - INFO - 17 changes detected
+2025-09-09 16:52:49,743 - watchfiles.main - INFO - 10 changes detected
+2025-09-09 16:52:50,482 - watchfiles.main - INFO - 4 changes detected
+2025-09-09 16:52:50,898 - watchfiles.main - INFO - 32 changes detected
+2025-09-09 16:52:52,229 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:52:52,591 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 16:53:10,246 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:53:22,121 - voice-intent - INFO - env_loaded
+2025-09-09 16:53:22,159 - voice-intent - INFO - env_loaded
+2025-09-09 16:53:22,164 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 16:53:22,644 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 16:53:22,648 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 16:53:22,700 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 16:53:22,736 - voice-intent - INFO - env_loaded
+2025-09-09 16:53:24,152 - watchfiles.main - INFO - 17 changes detected
+2025-09-09 16:53:24,619 - watchfiles.main - INFO - 10 changes detected
+2025-09-09 16:53:25,291 - watchfiles.main - INFO - 4 changes detected
+2025-09-09 16:53:25,707 - watchfiles.main - INFO - 18 changes detected
+2025-09-09 16:53:26,073 - watchfiles.main - INFO - 16 changes detected
+2025-09-09 16:53:41,244 - watchfiles.main - INFO - 6 changes detected
+2025-09-09 16:53:41,609 - watchfiles.main - INFO - 8 changes detected
+2025-09-09 16:53:42,023 - watchfiles.main - INFO - 13 changes detected
+2025-09-09 16:53:42,389 - watchfiles.main - INFO - 4 changes detected
+2025-09-09 16:53:43,291 - watchfiles.main - INFO - 8 changes detected
+2025-09-09 16:53:43,646 - watchfiles.main - INFO - 25 changes detected
+2025-09-09 16:53:47,952 - watchfiles.main - INFO - 12 changes detected
+2025-09-09 16:53:48,316 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:53:48,789 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:53:58,226 - watchfiles.main - INFO - 14 changes detected
+2025-09-09 16:53:58,902 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:54:03,348 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 16:54:15,987 - watchfiles.main - INFO - 1 change detected
+2025-09-09 16:54:23,331 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 16:56:30,534 - voice-intent - INFO - env_loaded
+2025-09-09 16:56:30,563 - voice-intent - INFO - env_loaded
+2025-09-09 16:56:30,567 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 16:56:30,992 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 16:56:30,996 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 16:56:31,053 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 16:56:31,126 - voice-intent - INFO - env_loaded
+2025-09-09 16:56:31,746 - watchfiles.main - INFO - 16 changes detected
+2025-09-09 16:56:33,345 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 16:59:09,462 - voice-intent - INFO - env_loaded
+2025-09-09 16:59:09,497 - voice-intent - INFO - env_loaded
+2025-09-09 16:59:09,500 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 16:59:09,928 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 16:59:09,931 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 16:59:09,969 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 16:59:10,003 - voice-intent - INFO - env_loaded
+2025-09-09 16:59:10,491 - watchfiles.main - INFO - 6 changes detected
+2025-09-09 16:59:10,857 - watchfiles.main - INFO - 19 changes detected
+2025-09-09 16:59:12,234 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 16:59:12,596 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:00:41,230 - voice-intent - INFO - env_loaded
+2025-09-09 17:00:41,259 - voice-intent - INFO - env_loaded
+2025-09-09 17:00:41,262 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 17:00:41,617 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 17:00:41,619 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 17:00:41,659 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 17:00:41,687 - voice-intent - INFO - env_loaded
+2025-09-09 17:01:22,443 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:01:23,140 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:08:48,371 - voice-intent - INFO - env_loaded
+2025-09-09 17:08:48,401 - voice-intent - INFO - env_loaded
+2025-09-09 17:08:48,404 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 17:08:48,803 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 17:08:48,806 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 17:08:48,847 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 17:08:48,875 - voice-intent - INFO - env_loaded
+2025-09-09 17:10:52,410 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:10:53,108 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:01,901 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 17:11:06,376 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:10,861 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:13,459 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 17:11:16,107 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:19,216 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:11:20,662 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:25,300 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:11:33,742 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:39,124 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:11:40,350 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:40,934 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:11:41,933 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:46,228 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:48,245 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:11:51,171 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:53,946 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:11:55,005 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:11:59,300 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:12:14,549 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:12:21,466 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 17:12:24,445 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:12:29,887 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:12:38,407 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:12:45,407 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 17:13:00,727 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:13:07,527 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 17:14:41,207 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:14:41,963 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:17:42,516 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:17:43,286 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:19:00,190 - voice-intent - INFO - env_loaded
+2025-09-09 17:19:00,350 - voice-intent - INFO - env_loaded
+2025-09-09 17:19:00,370 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 17:19:00,722 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 17:19:00,725 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 17:19:00,762 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 17:19:00,796 - voice-intent - INFO - env_loaded
+2025-09-09 17:20:43,897 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:20:44,599 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:21:24,201 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:21:24,869 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:21:31,753 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 17:21:38,529 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:21:46,283 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:22:00,421 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:22:07,194 - watchfiles.main - INFO - 5 changes detected
+2025-09-09 17:23:45,143 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:23:45,819 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:25:22,612 - voice-intent - INFO - env_loaded
+2025-09-09 17:25:22,642 - voice-intent - INFO - env_loaded
+2025-09-09 17:25:22,647 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 17:25:22,982 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 17:25:22,985 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 17:25:23,023 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 17:25:23,057 - voice-intent - INFO - env_loaded
+2025-09-09 17:26:46,349 - watchfiles.main - INFO - 1 change detected
+2025-09-09 17:26:47,225 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:30:12,650 - voice-intent - INFO - env_loaded
+2025-09-09 17:30:12,679 - voice-intent - INFO - env_loaded
+2025-09-09 17:30:12,683 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 17:30:13,289 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 17:30:13,294 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 17:30:13,336 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 17:30:13,369 - voice-intent - INFO - env_loaded
+2025-09-09 17:33:20,796 - voice-intent - INFO - env_loaded
+2025-09-09 17:33:20,826 - voice-intent - INFO - env_loaded
+2025-09-09 17:33:20,830 - root - WARNING - ClickSend SMS not configured - missing environment variables or library
+2025-09-09 17:33:21,192 - googleapiclient.discovery_cache - INFO - file_cache is only supported with oauth2client<4.0.0
+2025-09-09 17:33:21,195 - root - INFO - 📊 Google Sheets CRM initialized: enabled=True, spreadsheet_id=1RyE38G_aluJGkc6SoGGfufl3T9iiRIZCuYU11sTLSTM, tab_name=test
+2025-09-09 17:33:21,234 - root - INFO - ✅ Speech recognition initialized with remote Whisper: https://web-production-282ff.up.railway.app
+2025-09-09 17:33:21,267 - voice-intent - INFO - env_loaded
+2025-09-09 17:34:42,687 - watchfiles.main - INFO - 17 changes detected
+2025-09-09 17:34:43,061 - watchfiles.main - INFO - 10 changes detected
+2025-09-09 17:34:43,728 - watchfiles.main - INFO - 7 changes detected
+2025-09-09 17:34:44,087 - watchfiles.main - INFO - 16 changes detected
+2025-09-09 17:34:44,453 - watchfiles.main - INFO - 6 changes detected
+2025-09-09 17:34:44,813 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:34:50,565 - watchfiles.main - INFO - 2 changes detected
+2025-09-09 17:34:50,930 - watchfiles.main - INFO - 3 changes detected
+2025-09-09 17:35:20,271 - watchfiles.main - INFO - 1 change detected
