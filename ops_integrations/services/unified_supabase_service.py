@@ -44,13 +44,16 @@ class UnifiedSupabaseService:
     def __init__(self):
         # Use the same Supabase credentials as the main webpage
         self.supabase_url = os.getenv("SUPABASE_URL", "https://yzoalegdsogecfiqzfbp.supabase.co")
-        self.supabase_key = os.getenv("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6b2FsZWdkc29nZWNmaXF6ZmJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc2NTMyNzIsImV4cCI6MjA3MzIyOTI3Mn0.rZe11f29kVYP9_oI3ER6NAHPrYs5r6U4ksasV272HGw")
+        
+        # Try service role key first for call logging, fallback to anon key
+        self.supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6b2FsZWdkc29nZWNmaXF6ZmJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc2NTMyNzIsImV4cCI6MjA3MzIyOTI3Mn0.rZe11f29kVYP9_oI3ER6NAHPrYs5r6U4ksasV272HGw")
         
         if not self.supabase_url or not self.supabase_key:
             raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY environment variables are required")
         
         self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
-        logger.info(f"✅ Unified Supabase service initialized: {self.supabase_url}")
+        self.using_service_role = "SUPABASE_SERVICE_ROLE_KEY" in os.environ
+        logger.info(f"✅ Unified Supabase service initialized: {self.supabase_url} (using {'service role' if self.using_service_role else 'anon'} key)")
     
     # ===== SHOP MANAGEMENT =====
     
@@ -184,11 +187,47 @@ class UnifiedSupabaseService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Error logging call: {e}")
+            error_msg = str(e)
+            logger.error(f"❌ Error logging call: {error_msg}")
+            
+            # Check if it's a row-level security error
+            if "row-level security policy" in error_msg.lower():
+                logger.warning("🔒 Row-level security policy blocking call logging. Consider using SUPABASE_SERVICE_ROLE_KEY for call logging.")
+                # Fallback: log to local file for now
+                await self._fallback_log_call(call_data)
+            
             return {
                 'success': False,
-                'error': str(e)
+                'error': error_msg,
+                'fallback_logged': "row-level security policy" in error_msg.lower()
             }
+    
+    async def _fallback_log_call(self, call_data: CallData):
+        """Fallback logging when Supabase fails due to RLS policies"""
+        try:
+            import json
+            log_entry = {
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'call_sid': call_data.call_sid,
+                'salon_id': call_data.salon_id,
+                'caller_phone': call_data.caller_phone,
+                'call_type': call_data.call_type,
+                'outcome': call_data.outcome,
+                'intent': call_data.intent,
+                'sentiment': call_data.sentiment,
+                'duration_seconds': call_data.duration_seconds,
+                'source': 'fallback_logging'
+            }
+            
+            # Log to a local file
+            log_file = "/tmp/call_logs.jsonl"
+            with open(log_file, "a") as f:
+                f.write(json.dumps(log_entry) + "\n")
+            
+            logger.info(f"📝 Call logged to fallback file: {call_data.call_sid}")
+            
+        except Exception as fallback_error:
+            logger.error(f"❌ Fallback logging also failed: {fallback_error}")
     
     async def update_call_outcome(self, call_sid: str, outcome: str, intent: str = None, sentiment: str = None) -> bool:
         """Update call outcome after completion"""

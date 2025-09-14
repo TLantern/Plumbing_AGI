@@ -210,20 +210,41 @@ async def voice_webhook(request: Request):
                 timestamp=datetime.now().isoformat()
             )
             
-            await supabase_service.log_call(call_data)
+            log_result = await supabase_service.log_call(call_data)
             
-            logging.info(f"🏪 Salon call started: {call_sid} from {caller_number} to {to_number} (Location {location_id})")
+            if log_result['success']:
+                logging.info(f"🏪 Salon call started: {call_sid} from {caller_number} to {to_number} (Location {location_id})")
+            else:
+                logging.warning(f"⚠️ Call logging failed but continuing: {log_result.get('error', 'Unknown error')}")
+                if log_result.get('fallback_logged'):
+                    logging.info(f"📝 Call logged to fallback system: {call_sid}")
             
-            # Broadcast call start to dashboard
+            # Always broadcast call start to dashboard (even if Supabase logging failed)
             await _broadcast_to_dashboard("call_started", {
                 "call_sid": call_sid,
                 "location_id": location_id,
                 "caller_number": caller_number,
                 "to_number": to_number,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "supabase_logged": log_result.get('success', False),
+                "fallback_logged": log_result.get('fallback_logged', False)
             })
         except Exception as e:
             logging.error(f"Failed to create call record: {e}")
+            # Still broadcast to dashboard even if logging completely fails
+            try:
+                await _broadcast_to_dashboard("call_started", {
+                    "call_sid": call_sid,
+                    "location_id": location_id,
+                    "caller_number": caller_number,
+                    "to_number": to_number,
+                    "timestamp": datetime.now().isoformat(),
+                    "supabase_logged": False,
+                    "fallback_logged": False,
+                    "error": str(e)
+                })
+            except Exception as broadcast_error:
+                logging.error(f"Failed to broadcast call start: {broadcast_error}")
 
     # Return ConversationRelay TwiML
     if not settings.CI_SERVICE_SID:
