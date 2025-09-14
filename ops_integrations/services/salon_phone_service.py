@@ -23,6 +23,7 @@ from pydantic_settings import BaseSettings
 from .booking_service import booking_service
 from .knowledge_service import knowledge_service
 from .static_data_manager import static_data_manager, setup_location_data, get_location_status
+from .unified_supabase_service import get_unified_supabase_service, CallData, AppointmentData
 
 # Conversation context storage (replaced DB storage for call tracking)
 conversation_context: Dict[str, Dict[str, Any]] = {}  # call_sid -> call data with location info
@@ -85,7 +86,8 @@ openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_
 # Initialize Twilio client
 twilio_client = TwilioClient(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN) if settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN else None
 
-# Database initialization no longer needed with unified Supabase backend
+# Initialize unified Supabase service
+supabase_service = get_unified_supabase_service()
 logging.info("✅ Using unified Supabase storage backend")
 
 # FastAPI app
@@ -184,7 +186,7 @@ async def voice_webhook(request: Request):
     # Determine location from phone number
     location_id = get_location_from_phone_number(to_number)
     
-    # Initialize conversation context (no database needed with unified Supabase backend)
+    # Initialize conversation context and log call to Supabase
     if call_sid:
         try:
             # Initialize conversation context with location info
@@ -195,6 +197,18 @@ async def voice_webhook(request: Request):
                 'messages': [],
                 'start_time': datetime.now().isoformat()
             }
+            
+            # Log call to Supabase using unified service
+            call_data = CallData(
+                call_sid=call_sid,
+                salon_id=str(location_id),  # Convert to string for UUID compatibility
+                caller_phone=caller_number,
+                call_type="answered",
+                outcome="in_progress",
+                timestamp=datetime.now().isoformat()
+            )
+            
+            await supabase_service.log_call(call_data)
             
             logging.info(f"🏪 Salon call started: {call_sid} from {caller_number} to {to_number} (Location {location_id})")
             
@@ -429,8 +443,21 @@ async def conversation_relay_websocket(websocket: WebSocket):
                 
                 if intent_data.get("is_confirmation"):
                     logging.info(f"🎯 Booking confirmation detected in: '{text}'")
+                    # Update call outcome in Supabase
+                    await supabase_service.update_call_outcome(
+                        call_sid, 
+                        outcome="booked", 
+                        intent=intent_data.get("detected_services", "appointment_booking"),
+                        sentiment="positive"
+                    )
                 elif intent_data.get("has_booking_intent"):
                     logging.info(f"📅 Booking intent detected: {intent_data['detected_services']}")
+                    # Update call outcome in Supabase
+                    await supabase_service.update_call_outcome(
+                        call_sid, 
+                        outcome="inquiry", 
+                        intent=intent_data.get("detected_services", "general_inquiry")
+                    )
                 
                 # Interrupt any existing stream
                 if current_task and not current_task.done():
@@ -580,31 +607,37 @@ async def setup_new_shop(
         # 1. Setup location data from website
         result = await setup_location_data(location_id, website_url)
         
-        # 2. Store shop info in Supabase
-        from .supabase_storage import get_supabase_storage
-        supabase_storage = get_supabase_storage()
-        
-        salon_info = {
+        # 2. Create shop profile in Supabase using unified service
+        shop_data = {
             'salon_id': str(location_id),  # Convert to string for UUID compatibility
+            'salon_name': business_name or result.get("business_name", f"Shop {location_id}"),
             'business_name': business_name or result.get("business_name", "Unknown"),
             'website_url': website_url,
             'phone': phone_number,
-            'voice_id': voice_id or settings.ELEVENLABS_VOICE_ID
+            'timezone': 'America/New_York'  # Default timezone
         }
-        await supabase_storage.insert_salon_info(salon_info)
         
-        # 3. Update phone number mapping
+        shop_result = await supabase_service.create_or_update_shop(shop_data)
+        if not shop_result['success']:
+            raise Exception(f"Failed to create shop profile: {shop_result.get('error')}")
+        
+        # 3. Store services if available
+        if 'services' in result:
+            services_result = await supabase_service.store_services(str(location_id), result['services'])
+            logging.info(f"Stored {services_result.get('services_count', 0)} services for shop {location_id}")
+        
+        # 4. Update phone number mapping
         current_map = json.loads(settings.PHONE_TO_LOCATION_MAP)
         current_map[phone_number] = location_id
         
         # Note: In production, you'd want to persist this to environment variables or database
         logging.info(f"📞 Phone {phone_number} mapped to location {location_id}")
         
-        # 4. Broadcast shop update to dashboard
+        # 5. Broadcast shop update to dashboard
         await _broadcast_to_dashboard("shop_added", {
             "location_id": location_id,
             "phone_number": phone_number,
-            "business_name": salon_info['business_name'],
+            "business_name": shop_data['business_name'],
             "timestamp": datetime.now().isoformat()
         })
         
@@ -613,9 +646,10 @@ async def setup_new_shop(
             "location_id": location_id,
             "phone_number": phone_number,
             "website_url": website_url,
-            "business_name": business_name or result.get("business_name", "Unknown"),
+            "business_name": shop_data['business_name'],
             "voice_id": voice_id or settings.ELEVENLABS_VOICE_ID,
             "phone_mapping": current_map,
+            "services_count": services_result.get('services_count', 0) if 'services_result' in locals() else 0,
             "message": f"Shop {location_id} setup complete. Update PHONE_TO_LOCATION_MAP environment variable with: {json.dumps(current_map)}"
         }
     except Exception as e:
@@ -658,20 +692,31 @@ async def get_shop_config(location_id: int):
 async def list_all_shops():
     """List all configured shops with their phone numbers"""
     try:
-        phone_map = json.loads(settings.PHONE_TO_LOCATION_MAP)
-        shops = []
+        # Get shops from Supabase using unified service
+        shops_data = await supabase_service.list_all_shops()
         
-        for phone_number, location_id in phone_map.items():
+        # Get phone number mapping
+        phone_map = json.loads(settings.PHONE_TO_LOCATION_MAP)
+        
+        shops = []
+        for shop in shops_data:
+            location_id = int(shop['id']) if shop['id'].isdigit() else shop['id']
+            
+            # Find phone number for this shop
+            phone_number = next((phone for phone, loc_id in phone_map.items() if loc_id == location_id), None)
+            
+            # Get additional status info
             status = await get_location_status(location_id)
             knowledge = await knowledge_service.get_location_knowledge(location_id)
             
             shops.append({
                 "location_id": location_id,
                 "phone_number": phone_number,
-                "business_name": knowledge.business_name if knowledge else f"Location {location_id}",
+                "business_name": shop.get('salon_name', f"Shop {location_id}"),
                 "has_data": status.get("has_data", False),
                 "data_age_days": status.get("data_age_days", None),
-                "last_updated": knowledge.last_updated.isoformat() if knowledge else None
+                "last_updated": knowledge.last_updated.isoformat() if knowledge else None,
+                "timezone": shop.get('timezone', 'America/New_York')
             })
         
         return {"shops": shops, "total": len(shops)}
@@ -790,6 +835,90 @@ async def _broadcast_to_dashboard(message_type: str, data: Dict[str, Any]):
 async def get_current_metrics():
     """REST endpoint for current salon metrics"""
     return await _compute_salon_metrics()
+
+@app.get("/admin/platform-metrics")
+async def get_platform_metrics():
+    """Get platform-wide metrics for admin oversight"""
+    try:
+        metrics = await supabase_service.get_platform_metrics()
+        return {
+            "success": True,
+            "metrics": metrics,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logging.error(f"Error getting platform metrics: {e}")
+        return {"error": str(e)}
+
+@app.get("/admin/shop/{shop_id}/metrics")
+async def get_shop_metrics(shop_id: str, days: int = 30):
+    """Get detailed metrics for a specific shop"""
+    try:
+        metrics = await supabase_service.get_shop_metrics(shop_id, days)
+        calls_timeseries = await supabase_service.get_calls_timeseries(shop_id, days)
+        
+        return {
+            "success": True,
+            "shop_id": shop_id,
+            "period_days": days,
+            "metrics": metrics,
+            "calls_timeseries": calls_timeseries,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logging.error(f"Error getting shop metrics for {shop_id}: {e}")
+        return {"error": str(e)}
+
+@app.get("/admin/shop/{shop_id}/services")
+async def get_shop_services(shop_id: str):
+    """Get services for a specific shop"""
+    try:
+        services = await supabase_service.get_shop_services(shop_id)
+        return {
+            "success": True,
+            "shop_id": shop_id,
+            "services": services,
+            "count": len(services)
+        }
+    except Exception as e:
+        logging.error(f"Error getting shop services for {shop_id}: {e}")
+        return {"error": str(e)}
+
+@app.post("/admin/shop/{shop_id}/appointment")
+async def create_shop_appointment(
+    shop_id: str,
+    call_id: str = None,
+    service_id: str = None,
+    appointment_date: str = None,
+    estimated_revenue_cents: int = 0
+):
+    """Create an appointment for a shop"""
+    try:
+        appointment_data = AppointmentData(
+            salon_id=shop_id,
+            call_id=call_id,
+            service_id=service_id,
+            appointment_date=appointment_date,
+            estimated_revenue_cents=estimated_revenue_cents,
+            status="scheduled"
+        )
+        
+        result = await supabase_service.create_appointment(appointment_data)
+        
+        if result['success']:
+            # Broadcast appointment creation to dashboard
+            await _broadcast_to_dashboard("appointment_created", {
+                "shop_id": shop_id,
+                "appointment_id": result['appointment_id'],
+                "call_id": call_id,
+                "estimated_revenue_cents": estimated_revenue_cents,
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        return result
+    except Exception as e:
+        logging.error(f"Error creating appointment for shop {shop_id}: {e}")
+        return {"error": str(e)}
 
 
 # Basic logging setup
