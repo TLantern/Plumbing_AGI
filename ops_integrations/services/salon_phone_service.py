@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     DEFAULT_LOCATION_ID: int = 1
     
     # Phone number to location mapping (JSON string)
+    # +18084826296 (808 number) -> Location 1 (SafeHarbour's Salon)
+    # +1234567890 (placeholder) -> Location 2 (Teni's Salon)
     PHONE_TO_LOCATION_MAP: str = '{"+18084826296": 1, "+1234567890": 2}'
     
     # Other
@@ -686,6 +688,59 @@ async def get_shop_config(location_id: int):
         }
     except Exception as e:
         logging.error(f"Error getting shop config {location_id}: {e}")
+        return {"error": str(e)}
+
+@app.post("/shop/{location_id}/update")
+async def update_shop_config(
+    location_id: int,
+    business_name: str = None,
+    phone_number: str = None,
+    website_url: str = None
+):
+    """Update existing shop configuration"""
+    try:
+        # Prepare shop data for update
+        shop_data = {
+            'salon_id': str(location_id),
+            'salon_name': business_name,
+            'phone': phone_number,
+            'timezone': 'America/New_York'
+        }
+        
+        # Remove None values
+        shop_data = {k: v for k, v in shop_data.items() if v is not None}
+        
+        if not shop_data:
+            return {"error": "No data provided for update"}
+        
+        # Update shop profile in Supabase
+        shop_result = await supabase_service.create_or_update_shop(shop_data)
+        if not shop_result['success']:
+            raise Exception(f"Failed to update shop profile: {shop_result.get('error')}")
+        
+        # Update phone number mapping if phone provided
+        if phone_number:
+            current_map = json.loads(settings.PHONE_TO_LOCATION_MAP)
+            current_map[phone_number] = location_id
+            logging.info(f"📞 Phone {phone_number} mapped to location {location_id}")
+        
+        # Broadcast shop update to dashboard
+        await _broadcast_to_dashboard("shop_updated", {
+            "location_id": location_id,
+            "business_name": business_name,
+            "phone_number": phone_number,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        return {
+            "success": True,
+            "location_id": location_id,
+            "business_name": business_name,
+            "phone_number": phone_number,
+            "message": f"Shop {location_id} updated successfully"
+        }
+    except Exception as e:
+        logging.error(f"Error updating shop {location_id}: {e}")
         return {"error": str(e)}
 
 @app.get("/shops")
