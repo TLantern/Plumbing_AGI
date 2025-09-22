@@ -17,6 +17,7 @@ export default function SignIn() {
       redirect: false,
       username,
       password,
+      callbackUrl: window.location.origin + '/dashboard',
     });
     if (res?.ok) {
       router.replace('/dashboard');
