@@ -10,13 +10,13 @@ import { PeakHoursHeat } from "@/components/salon/PeakHoursHeat";
 import { DateRangeSelector } from "@/components/salon/DateRangeSelector";
 import { InsightsBlock } from "@/components/salon/InsightsBlock";
 import { GoogleCalendar } from "@/components/calendar/GoogleCalendar";
+import { RealTimeActivity } from "@/components/salon/RealTimeActivity";
 import { ContentCalendarGrid } from "@/components/calendar/ContentCalendarGrid";
-import { LiveCallToAppointmentConversion } from "@/components/salon/LiveCallToAppointmentConversion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Phone, Calendar as CalendarIcon } from "lucide-react";
-// import { ThemeToggle } from "@/components/ThemeToggle";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useSalonData } from "@/hooks/useSalonData";
 import { useGoogleOAuth } from "@/hooks/useGoogleOAuth";
 import { calculateProjectedMonthlyRevenue } from "@/lib/salonData";
@@ -104,7 +104,7 @@ const DashboardContent = () => {
                 selectedRange={dateRange} 
                 onRangeChange={setDateRange} 
               />
-              {/* <ThemeToggle /> */}
+              <ThemeToggle />
             </div>
           </header>
 
@@ -134,7 +134,6 @@ const DashboardContent = () => {
                     <p className="text-xs text-muted-foreground">From AI calls</p>
                   </CardContent>
                 </Card>
-                <LiveCallToAppointmentConversion dateRange={dateRange} />
                 <Card className="shadow-card">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium">Most Recent Booking</CardTitle>
@@ -167,12 +166,15 @@ const DashboardContent = () => {
                       <h3 className="font-semibold">Connect Calendar</h3>
                       <p className="text-sm text-muted-foreground">Sync Google Calendar</p>
                     </div>
-                    <Button size="sm" onClick={() => navigate("/calendar")}>Connect</Button>
+                    <Button size="sm" onClick={() => navigate("/settings")}>Connect</Button>
                   </div>
                 </div>
               </div>
               <div className="lg:w-2/3 lg:ml-auto">
                 <div className="rounded-lg border bg-card">
+                  <div className="p-4 border-b">
+                    <h3 className="font-semibold">Content Calendar</h3>
+                  </div>
                   <div className="p-2">
                     <ContentCalendarGrid />
                   </div>
@@ -212,6 +214,10 @@ const DashboardContent = () => {
               </div>
             </div>
 
+            {/* Real-Time Activity */}
+            <div className="mb-6">
+              <RealTimeActivity />
+            </div>
 
             {/* Peak Hours */}
             <div>

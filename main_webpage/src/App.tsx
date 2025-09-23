@@ -6,9 +6,6 @@ import { Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
-import Analytics from "./pages/Analytics";
-import Calendar from "./pages/Calendar";
-import CallHistory from "./pages/CallHistory";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import Account from "./pages/Account";
@@ -39,9 +36,6 @@ const App = () => (
         <Route path="/auth" element={<Auth />} />
         
         <Route path="/dashboard" element={<MaybeProtected><Dashboard /></MaybeProtected>} />
-        <Route path="/analytics" element={<MaybeProtected><Analytics /></MaybeProtected>} />
-        <Route path="/calendar" element={<MaybeProtected><Calendar /></MaybeProtected>} />
-        <Route path="/calls" element={<MaybeProtected><CallHistory /></MaybeProtected>} />
         <Route path="/profile" element={<MaybeProtected><Profile /></MaybeProtected>} />
         <Route path="/settings" element={<MaybeProtected><Settings /></MaybeProtected>} />
         <Route path="/settings/shop" element={<MaybeProtected><ShopSettings /></MaybeProtected>} />

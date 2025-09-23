@@ -5,7 +5,6 @@ import { Calendar, Clock, MapPin, Users, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, parseISO, isToday, isTomorrow, isThisWeek, addDays, addHours } from 'date-fns';
 import { GoogleCalendarSecurity } from './GoogleCalendarSecurity';
-import { useGoogleOAuth } from '@/hooks/useGoogleOAuth';
 
 // Mock calendar events
 const mockCalendarEvents: CalendarEvent[] = [
@@ -74,25 +73,22 @@ interface CalendarEvent {
 
 export const GoogleCalendar = () => {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
   const { toast } = useToast();
-  const { isConnected, isLoading: connecting, connect, disconnect } = useGoogleOAuth();
 
-  const loadCalendarEvents = async () => {
-    if (!isConnected) {
-      setEvents([]);
-      setLoading(false);
-      return;
-    }
-
+  const checkConnection = async () => {
     try {
-      setLoading(true);
-      // TODO: Replace with actual Google Calendar API call
-      // For now, use mock data when connected
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Use mock data - simulate being connected
+      setIsConnected(true);
       setEvents(mockCalendarEvents);
     } catch (error) {
-      console.error('Error loading calendar events:', error);
-      setEvents([]);
+      console.error('Error checking calendar connection:', error);
+      setIsConnected(false);
     } finally {
       setLoading(false);
     }
@@ -100,10 +96,28 @@ export const GoogleCalendar = () => {
 
   const connectGoogleCalendar = async () => {
     try {
-      await connect();
-      // Events will be loaded in useEffect when isConnected changes
+      setConnecting(true);
+      
+      // Simulate connection process
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      toast({
+        title: "Connected Successfully!",
+        description: "Your Google Calendar has been connected.",
+      });
+      
+      // Set to connected state with mock events
+      setIsConnected(true);
+      setEvents(mockCalendarEvents);
     } catch (error) {
       console.error('Error connecting to Google Calendar:', error);
+      toast({
+        title: "Connection Error", 
+        description: "Failed to connect to Google Calendar. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -123,8 +137,8 @@ export const GoogleCalendar = () => {
   };
 
   useEffect(() => {
-    loadCalendarEvents();
-  }, [isConnected]);
+    checkConnection();
+  }, []);
 
   if (loading) {
     return (

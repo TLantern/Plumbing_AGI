@@ -19,42 +19,33 @@ export type Database = {
           appointment_date: string | null
           call_id: string | null
           created_at: string | null
-          customer_name: string | null
           estimated_revenue_cents: number | null
           id: string
-          job_type: string | null
           salon_id: string | null
           service_id: string | null
           status: string | null
-          technician: string | null
           updated_at: string | null
         }
         Insert: {
           appointment_date?: string | null
           call_id?: string | null
           created_at?: string | null
-          customer_name?: string | null
           estimated_revenue_cents?: number | null
           id?: string
-          job_type?: string | null
           salon_id?: string | null
           service_id?: string | null
           status?: string | null
-          technician?: string | null
           updated_at?: string | null
         }
         Update: {
           appointment_date?: string | null
           call_id?: string | null
           created_at?: string | null
-          customer_name?: string | null
           estimated_revenue_cents?: number | null
           id?: string
-          job_type?: string | null
           salon_id?: string | null
           service_id?: string | null
           status?: string | null
-          technician?: string | null
           updated_at?: string | null
         }
         Relationships: [
