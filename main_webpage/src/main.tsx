@@ -14,7 +14,7 @@ const AppWithOAuth = () => {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
         <AppWithOAuth />
       </ThemeProvider>
     </BrowserRouter>
