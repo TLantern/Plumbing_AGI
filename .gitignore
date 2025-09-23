@@ -36,3 +36,13 @@ env/
 *.swp
 *.swo
 *~
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.backup
+*.env
+
+# Local environment files
+extras/env_local.txt

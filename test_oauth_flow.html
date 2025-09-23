@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google OAuth Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success { border-color: #4CAF50; background-color: #f1f8e9; }
+        .error { border-color: #f44336; background-color: #ffebee; }
+        .warning { border-color: #ff9800; background-color: #fff3e0; }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background-color: #45a049; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        .log {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .status.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .status.info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Google OAuth Integration Test</h1>
+        <p>This page tests the Google Calendar OAuth integration step by step.</p>
+
+        <div class="test-section">
+            <h3>1. Supabase Connection Test</h3>
+            <button onclick="testSupabaseConnection()">Test Connection</button>
+            <div id="supabase-status" class="status"></div>
+            <div id="supabase-log" class="log"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>2. Google OAuth URL Generation</h3>
+            <button onclick="testOAuthUrlGeneration()">Generate OAuth URL</button>
+            <div id="oauth-status" class="status"></div>
+            <div id="oauth-log" class="log"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>3. OAuth Flow Test</h3>
+            <button onclick="startOAuthFlow()">Start OAuth Flow</button>
+            <div id="flow-status" class="status"></div>
+            <div id="flow-log" class="log"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>4. Manual OAuth Test</h3>
+            <p>Click the button below to manually test the OAuth flow:</p>
+            <button onclick="manualOAuthTest()">Test OAuth Flow</button>
+            <div id="manual-status" class="status"></div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const config = {
+            supabaseUrl: 'https://yzoalegdsogecfiqzfbp.supabase.co',
+            supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6b2FsZWdkc29nZWNmaXF6ZmJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc2NTMyNzIsImV4cCI6MjA3MzIyOTI3Mn0.rZe11f29kVYP9_oI3ER6NAHPrYs5r6U4ksasV272HGw',
+            googleClientId: '20030545519-62boikt39ohgdrje8gbaga43ke1ukmsu.apps.googleusercontent.com'
+        };
+
+        function log(elementId, message) {
+            const element = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            element.textContent += `[${timestamp}] ${message}\n`;
+            element.scrollTop = element.scrollHeight;
+        }
+
+        function setStatus(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `status ${type}`;
+        }
+
+        async function testSupabaseConnection() {
+            setStatus('supabase-status', 'Testing Supabase connection...', 'info');
+            log('supabase-log', 'Starting Supabase connection test...');
+
+            try {
+                const response = await fetch(`${config.supabaseUrl}/rest/v1/`, {
+                    headers: {
+                        'apikey': config.supabaseAnonKey,
+                        'Authorization': `Bearer ${config.supabaseAnonKey}`
+                    }
+                });
+
+                if (response.ok) {
+                    setStatus('supabase-status', '✅ Supabase connection successful', 'success');
+                    log('supabase-log', 'Supabase connection test passed');
+                } else {
+                    setStatus('supabase-status', `❌ Supabase connection failed: ${response.status}`, 'error');
+                    log('supabase-log', `Supabase connection failed: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                setStatus('supabase-status', `❌ Supabase connection error: ${error.message}`, 'error');
+                log('supabase-log', `Supabase connection error: ${error.message}`);
+            }
+        }
+
+        function testOAuthUrlGeneration() {
+            setStatus('oauth-status', 'Generating OAuth URL...', 'info');
+            log('oauth-log', 'Starting OAuth URL generation test...');
+
+            try {
+                const scopes = [
+                    'https://www.googleapis.com/auth/calendar.readonly',
+                    'https://www.googleapis.com/auth/userinfo.email',
+                    'https://www.googleapis.com/auth/userinfo.profile'
+                ];
+
+                const redirectUri = window.location.origin + '/dashboard';
+                const state = 'test-user-id-' + Date.now();
+
+                const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                    `client_id=${config.googleClientId}&` +
+                    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                    `scope=${encodeURIComponent(scopes.join(' '))}&` +
+                    `response_type=code&` +
+                    `access_type=offline&` +
+                    `prompt=consent&` +
+                    `state=${state}`;
+
+                setStatus('oauth-status', '✅ OAuth URL generated successfully', 'success');
+                log('oauth-log', `OAuth URL generated successfully`);
+                log('oauth-log', `URL length: ${authUrl.length}`);
+                log('oauth-log', `Contains client_id: ${authUrl.includes(config.googleClientId)}`);
+                log('oauth-log', `Contains redirect_uri: ${authUrl.includes(redirectUri)}`);
+                log('oauth-log', `Contains scopes: ${authUrl.includes('calendar.readonly')}`);
+                log('oauth-log', `Full URL: ${authUrl}`);
+
+                // Store the URL for manual testing
+                window.testAuthUrl = authUrl;
+            } catch (error) {
+                setStatus('oauth-status', `❌ OAuth URL generation error: ${error.message}`, 'error');
+                log('oauth-log', `OAuth URL generation error: ${error.message}`);
+            }
+        }
+
+        async function startOAuthFlow() {
+            setStatus('flow-status', 'Starting OAuth flow test...', 'info');
+            log('flow-log', 'Starting OAuth flow test...');
+
+            try {
+                // First, try to get a valid session by signing in anonymously
+                log('flow-log', 'Attempting to create anonymous session...');
+                
+                const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+                const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
+
+                const { data: authData, error: authError } = await supabase.auth.signInAnonymously();
+                
+                if (authError) {
+                    throw new Error(`Authentication failed: ${authError.message}`);
+                }
+
+                log('flow-log', 'Anonymous session created successfully');
+                log('flow-log', `User ID: ${authData.user?.id}`);
+
+                // Now try to call the OAuth function with the valid session
+                const { data: oauthData, error: oauthError } = await supabase.functions.invoke('google-oauth', {
+                    body: { action: 'get_auth_url' }
+                });
+
+                if (oauthError) {
+                    throw new Error(`OAuth function error: ${oauthError.message}`);
+                }
+
+                setStatus('flow-status', '✅ OAuth flow test successful', 'success');
+                log('flow-log', 'OAuth function called successfully');
+                log('flow-log', `Auth URL received: ${oauthData.authUrl ? 'Yes' : 'No'}`);
+
+                if (oauthData.authUrl) {
+                    log('flow-log', `Auth URL: ${oauthData.authUrl}`);
+                }
+
+            } catch (error) {
+                setStatus('flow-status', `❌ OAuth flow test failed: ${error.message}`, 'error');
+                log('flow-log', `OAuth flow test error: ${error.message}`);
+            }
+        }
+
+        function manualOAuthTest() {
+            if (!window.testAuthUrl) {
+                setStatus('manual-status', 'Please generate OAuth URL first', 'warning');
+                return;
+            }
+
+            setStatus('manual-status', 'Opening OAuth flow in new window...', 'info');
+            
+            // Open the OAuth URL in a new window
+            const oauthWindow = window.open(
+                window.testAuthUrl,
+                'google-oauth',
+                'width=500,height=600,scrollbars=yes,resizable=yes'
+            );
+
+            // Monitor the OAuth window
+            const checkClosed = setInterval(() => {
+                if (oauthWindow.closed) {
+                    clearInterval(checkClosed);
+                    setStatus('manual-status', 'OAuth window closed. Check the URL for authorization code.', 'info');
+                }
+            }, 1000);
+        }
+
+        // Check for OAuth callback parameters
+        function checkOAuthCallback() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const state = urlParams.get('state');
+            const error = urlParams.get('error');
+
+            if (error) {
+                setStatus('manual-status', `OAuth Error: ${error}`, 'error');
+                return;
+            }
+
+            if (code && state) {
+                setStatus('manual-status', `✅ OAuth callback received! Code: ${code.substring(0, 20)}...`, 'success');
+                log('flow-log', `OAuth callback received with code: ${code}`);
+                log('flow-log', `State: ${state}`);
+            }
+        }
+
+        // Initialize the page
+        window.addEventListener('load', () => {
+            checkOAuthCallback();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+project_id = "yzoalegdsogecfiqzfbp"
+
+[functions.google-oauth]
+verify_jwt = true
+
+[functions.google-calendar]
+verify_jwt = true
