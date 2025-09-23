@@ -49,4 +49,22 @@ SUPPLIER_API_KEY=local_supplier_key
 DATABASE_URL=postgresql://username:password@localhost:5432/plumbing_AGI
 
 # Logging Configuration
-LOG_LEVEL=DEBUG 
+LOG_LEVEL=DEBUG
+
+# Clerk Authentication Configuration (Frontend)
+# For local development - use test keys
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_test_key_here
+VITE_CLERK_SECRET_KEY=sk_test_your_test_secret_here
+
+# Supabase Configuration
+VITE_SUPABASE_PROJECT_ID=yzoalegdsogecfiqzfbp
+VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6b2FsZWdkc29nZWNmaXF6ZmJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc2NTMyNzIsImV4cCI6MjA3MzIyOTI3Mn0.rZe11f29kVYP9_oI3ER6NAHPrYs5r6U4ksasV272HGw
+VITE_SUPABASE_URL=https://yzoalegdsogecfiqzfbp.supabase.co
+
+# Legacy NextAuth (if needed)
+NEXTAUTH_URL=http://localhost:8080
+NEXTAUTH_SECRET=your_secret_key_for_local_development
+AUTH_USERNAME=admin
+AUTH_PASSWORD=admin 
+
+https://yzoalegdsogecfiqzfbp.supabase.co

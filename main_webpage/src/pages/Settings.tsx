@@ -238,19 +238,19 @@ const Settings = () => {
               <CardDescription>Customize how the application looks</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div>
-                <Label htmlFor="theme">Theme</Label>
-                <Select defaultValue="system">
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="light">Light</SelectItem>
-                    <SelectItem value="dark">Dark</SelectItem>
-                    <SelectItem value="system">System</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              /*               <div>
+              /*                 <Label htmlFor="theme">Theme</Label>
+              /*                 <Select defaultValue="system">
+              /*                   <SelectTrigger>
+              /*                     <SelectValue />
+              /*                   </SelectTrigger>
+              /*                   <SelectContent>
+              /*                     <SelectItem value="light">Light</SelectItem>
+              /*                     <SelectItem value="dark">Dark</SelectItem>
+              /*                     <SelectItem value="system">System</SelectItem>
+              /*                   </SelectContent>
+              /*                 </Select>
+              /*               </div> */
               <div>
                 <Label htmlFor="language">Language</Label>
                 <Select defaultValue="en">

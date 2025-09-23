@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Phone, Calendar as CalendarIcon } from "lucide-react";
-import { ThemeToggle } from "@/components/ThemeToggle";
+// import { ThemeToggle } from "@/components/ThemeToggle";
 import { useSalonData } from "@/hooks/useSalonData";
 import { useGoogleOAuth } from "@/hooks/useGoogleOAuth";
 import { calculateProjectedMonthlyRevenue } from "@/lib/salonData";
@@ -104,7 +104,7 @@ const DashboardContent = () => {
                 selectedRange={dateRange} 
                 onRangeChange={setDateRange} 
               />
-              <ThemeToggle />
+              {/* <ThemeToggle /> */}
             </div>
           </header>
 

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { DateRangeSelector } from "@/components/salon/DateRangeSelector";
-import { ThemeToggle } from "@/components/ThemeToggle";
+// import { ThemeToggle } from "@/components/ThemeToggle";
 import { useSalonData } from "@/hooks/useSalonData";
 import type { DateRange } from "@/types/salon";
 import { 
@@ -129,7 +129,7 @@ const CallHistory = () => {
                 selectedRange={dateRange} 
                 onRangeChange={setDateRange} 
               />
-              <ThemeToggle />
+              {/* <ThemeToggle /> */}
             </div>
           </header>
 

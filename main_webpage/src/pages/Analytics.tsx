@@ -4,7 +4,7 @@ import { DashboardSidebar } from "@/components/dashboard/DashboardSidebar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DateRangeSelector } from "@/components/salon/DateRangeSelector";
-import { ThemeToggle } from "@/components/ThemeToggle";
+// import { ThemeToggle } from "@/components/ThemeToggle";
 import { useSalonData } from "@/hooks/useSalonData";
 import { calculateProjectedMonthlyRevenue } from "@/lib/salonData";
 import type { DateRange } from "@/types/salon";
@@ -97,7 +97,7 @@ const Analytics = () => {
                 selectedRange={dateRange} 
                 onRangeChange={setDateRange} 
               />
-              <ThemeToggle />
+              {/* <ThemeToggle /> */}
             </div>
           </header>
 
